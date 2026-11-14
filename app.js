@@ -1622,6 +1622,7 @@ document.addEventListener('keydown', event => {
 
 function openPhone({ eyebrow, title, subtitle, cards, counts = null, listTitle, rows, note, focus, zoom = camera.zoom, mood = 'happy' }) {
   document.querySelector('.mission-board')?.remove();
+  document.querySelector('.mission-recheck')?.remove();
   document.querySelector('.city-stats-dialog').classList.remove('is-mission-board');
   document.querySelector('#city-stats-list').hidden = false;
   document.querySelector('#city-stats-list-name').parentElement.hidden = false;
@@ -1829,6 +1830,14 @@ function showMissionBoard({ focus = true } = {}) {
 
 // Fixed landmarks report on the whole ward.
 const landmarkBlock = (name) => blocks[landmarks.find((landmark) => landmark.name === name)?.block ?? 0];
+function readMissionProgress() {
+  const scope = currentCheck?.id || 'sample-city';
+  let storage;
+  try { storage = window.localStorage; } catch { /* Private mode keeps progress in memory. */ }
+  const progress = missionSession.get(scope) || readProgress(storage, scope);
+  missionSession.set(scope, progress);
+  return progress;
+}
 const landmarkReports = {
   gcpd: () => showMissionBoard(),
   // Gotham Bank: every account, by when it was opened.
@@ -1866,35 +1875,44 @@ const landmarkReports = {
       mood: 'normal',
     });
   },
-  // Blackgate Penitentiary: old breaches, locked away after the 12-month window.
+  // Blackgate Penitentiary: self-reported completed security actions.
   blackgate: () => {
-    const locked = accounts.flatMap((account) => (account.historical ?? []).map((breach) => [account.name, `${breach.name} · ${breach.date || 'date unknown'}`, 'HISTORICAL', 'historical']));
+    const progress = readMissionProgress();
+    const completed = buildMissions(accounts).filter((task) => progress[task.key]);
     openPhone({
-      eyebrow: 'BLACKGATE · LOCKED AWAY',
-      title: 'Historical breaches',
-      subtitle: `Breaches older than ${RECENT_BREACH_MONTHS} months`,
-      cards: [['LOCKED UP', locked.length, 'total']],
-      listTitle: 'SERVED THEIR TIME',
-      rows: locked,
-      note: 'Old breaches still count: change those passwords if you never did.',
+      eyebrow: 'BLACKGATE · FIX HISTORY',
+      title: 'Completed actions',
+      subtitle: 'Security steps you marked complete on the mission board',
+      cards: [['ACTIONS COMPLETED', completed.length, 'clear']],
+      listTitle: 'COMPLETED',
+      rows: completed.map((task) => [task.account, task.title, 'DONE', 'clear']),
+      note: completed.length ? 'Completion is self-reported and saved in this browser. Reopen a task from GCPD if you need to review it.' : 'No actions marked complete yet. GCPD Headquarters has your prioritized security checklist.',
       focus: landmarkBlock('Blackgate Penitentiary'),
-      mood: locked.length ? 'wary' : 'happy',
+      mood: completed.length ? 'happy' : 'normal',
     });
   },
-  // Elliot Memorial: sites the check couldn't reach.
+  // Elliot Memorial: unknown accounts plus an easy route to run the check again.
   elliot: () => {
     const unknown = accounts.filter((account) => account.status === 'unknown');
     openPhone({
-      eyebrow: 'ELLIOT MEMORIAL · NEEDS A RECHECK',
-      title: "Couldn't check",
-      subtitle: 'Unknown is not clear',
+      eyebrow: 'ELLIOT MEMORIAL · RECHECK QUEUE',
+      title: 'Checks to retry',
+      subtitle: 'Unavailable results need a fresh check; unknown does not mean clear',
       cards: [['UNCHECKED', unknown.length, unknown.length ? 'unknown' : 'clear']],
-      listTitle: 'IN RECOVERY',
-      rows: unknown.map((account) => [account.name, account.error || 'The source did not answer.', 'UNKNOWN', 'unknown']),
-      note: 'Run the check again later.',
+      listTitle: 'NEEDS A RECHECK',
+      rows: unknown.map((account) => [account.name, account.error || 'The source did not answer.', 'RETRY', 'unknown']),
+      note: unknown.length ? 'Use Check in the navigation to rerun the verified email check. A successful result replaces the current account list.' : 'No unavailable checks right now.',
       focus: landmarkBlock('Elliot Memorial'),
       mood: unknown.length ? 'unsure' : 'happy',
     });
+    if (unknown.length) {
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'mission-recheck';
+      retry.textContent = 'Run check again';
+      retry.addEventListener('click', runChecks);
+      document.querySelector('#city-stats-note').after(retry);
+    }
   },
   wayne: () => openPhone({
     eyebrow: 'WAYNE TOWER · ACCOUNT MONITOR',
@@ -1909,17 +1927,20 @@ const landmarkReports = {
     mood: 'normal', // Wayne Tower is home base: calm whatever the city's state
   }),
   arkham: () => {
-    const breached = accounts.filter((account) => account.status === 'breached');
     openPhone({
-      eyebrow: 'ARKHAM ASYLUM · BREACH WARD',
-      title: 'Breached websites',
-      subtitle: 'Sites where your email turned up in a known breach',
-      cards: [['BREACHED SITES', breached.length, 'breached'], ['BREACHES', breached.reduce((sum, account) => sum + account.breaches.length, 0), 'breached']],
-      listTitle: 'LOCKED UP',
-      rows: breached.map((account) => [account.name, account.breaches.map((breach) => `${breach.name} (${breach.date || 'date unknown'})`).join(', ') || 'Breach details unavailable', 'BREACH', 'breached']),
-      note: 'Change the password on each of these sites, and anywhere you reused it.',
+      eyebrow: 'ARKHAM ASYLUM · PASSWORD SAFETY',
+      title: 'Check for password reuse',
+      subtitle: 'A practical review guide for accounts with breach exposure',
+      cards: [['PASSWORDS COLLECTED', '0', 'clear'], ['REVIEW STEPS', 3, 'total']],
+      listTitle: 'YOUR CHECKLIST',
+      rows: [
+        ['Start with breached accounts', 'Review each exposed service, starting with recent breaches.', 'STEP 01', 'breached'],
+        ['Use a unique password', 'If you reused that password elsewhere, change those accounts too.', 'STEP 02', 'unknown'],
+        ['Store it in a password manager', 'Generate and save a different strong password for each service.', 'STEP 03', 'clear'],
+      ],
+      note: 'Breach City never collects passwords and cannot detect reuse. This checklist is guidance for you to review privately.',
       focus: blocks[landmarks.find(l => l.name === 'Arkham Asylum').block],
-      mood: breached.length ? 'angry' : 'happy',
+      mood: 'normal',
     });
   },
   ace: () => {
