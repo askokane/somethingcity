@@ -8,7 +8,7 @@ Adapted Justin's `19c79ef` map-density handoff to the older frontend on main.
 4. A new island, roads, waterfront and two bridges replace the old nine-block environment, whose baked filler geometry does not match the larger grid.
 5. Landmark filenames are data-driven. Wayne Tower, Ace Chemicals and Arkham load existing models. The other five use labeled grey placeholders until their GLBs are added to `models/buildings/`.
 
-Landmarks currently open the existing city-wide overview with the landmark's name. Landmark-specific dashboard content is a separate backend/frontend integration.
+Justin's fixed-landmarks branch is now integrated: Wayne Tower, Ace Chemicals and Arkham open their specialized bat-phone reports. The remaining five open city-wide account summaries while their models are pending. Per-site reports, 12-month breach history, rooftop villains, the bat-status mascot and the city planner are retained.
 
 ## Verification
 

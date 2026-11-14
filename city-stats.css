@@ -289,3 +289,63 @@
 @media (prefers-reduced-motion: reduce) {
   .city-stats-dialog { animation: none; }
 }
+
+/* Breaches older than the recent window: muted, not alarming. */
+.city-stats-row.status-historical { border-left-color: #7d8a96; }
+.city-stats-row.status-historical .city-stats-status { color: #b7c2cc; border-color: #7d8a96; }
+
+/* Cards with a sublist are buttons: same look, plus a hint that they open. */
+button.city-stats-card { width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.city-stats-card:hover, button.city-stats-card:focus-visible { background: #22394d; outline: 2px solid #ffd45e; outline-offset: -2px; }
+button.city-stats-card span::after { content: " \203A"; color: #ffd45e; }
+
+/* The sublist slides over the phone screen, under the notch. */
+.city-stats-sheet { position: absolute; z-index: 3; inset: 44px 10px 10px; display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow: auto; border: 2px solid #526476; background: #0f1f2e; box-shadow: 0 8px 24px #0009; font: 11px/1.5 "Courier New", monospace; color: #c5d5ce; }
+.city-stats-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.city-stats-sheet-head strong { color: #ffe480; letter-spacing: .08em; }
+.city-stats-sheet-head button { border: 1px solid #526476; background: #1a2d3e; color: #ffe480; font: 700 10px "Courier New", monospace; padding: 4px 8px; cursor: pointer; }
+.city-stats-sheet p { margin: 0; color: #a9c2c0; }
+.city-stats-sheet ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.city-stats-sheet li { padding: 7px 8px; border-left: 3px solid #e58268; background: #1a2d3e; }
+.city-stats-sheet li strong, .city-stats-sheet li small { display: block; }
+.city-stats-sheet li small { margin-top: 2px; color: #a9c2c0; }
+
+/* Bat-phone, 8-bit: square pixel bezel in bat-signal yellow, hard drop shadow, pixel bat emblem for the notch. */
+.city-stats-dialog { border: 4px solid #ffd45e; border-radius: 6px; background: #07090d; box-shadow: 0 0 0 4px #000, 10px 10px 0 #000; }
+.city-stats-screen { border: 3px solid #000; border-radius: 2px; background: #0b1220; box-shadow: inset 0 0 0 2px #1c2a3e; }
+.city-stats-phone-notch { top: 12px; width: 64px; height: 26px; border: 3px solid #000; border-radius: 0; background: #07090d; }
+.bat-emblem { width: 39px; height: 18px; display: block; }
+.city-stats-phonebar { color: #ffd45e; letter-spacing: .14em; }
+.city-stats-close { border-radius: 0; border: 3px solid #000; background: #ffd45e; color: #000; box-shadow: 3px 3px 0 #000; }
+.city-stats-close:hover, .city-stats-close:focus-visible { background: #ffe58f; border-color: #000; outline: 2px solid #ffd45e; }
+
+
+/* Bat-phone: a black handset with cowl ears, a yellow oval bat emblem for the notch and a utility belt under the screen. */
+.city-stats-dialog { margin-top: 34px; border-color: #ffd45e; background: linear-gradient(180deg, #11151d, #05070a); }
+.bat-phone-ears { position: absolute; z-index: 1; left: -4px; right: -4px; top: -32px; width: calc(100% + 8px); height: 30px; }
+.city-stats-phone-notch { top: 8px; width: 74px; height: 34px; border: 3px solid #000; border-radius: 50%; background: #ffd45e; box-shadow: 0 0 0 2px #ffd45e55; }
+.bat-emblem { width: 46px; height: 21px; }
+.bat-phone-belt { position: absolute; z-index: 3; left: 18%; right: 18%; bottom: -9px; display: flex; gap: 4px; justify-content: center; align-items: center; height: 14px; padding: 0 6px; border: 3px solid #000; background: #c9a227; }
+.bat-phone-belt i { width: 16px; height: 9px; border: 2px solid #000; background: #ffd45e; }
+.bat-phone-belt b { width: 20px; height: 12px; border: 2px solid #000; background: #fff3b0; }
+.city-stats-phonebar { left: 24px; }
+
+/* Bat-status: bottom-left of the city view, always visible. Its color follows the mood. */
+.bat-status { position: absolute; z-index: 5; left: 14px; bottom: 14px; display: flex; align-items: center; gap: 10px; max-width: min(320px, calc(100% - 28px)); padding: 8px 12px 8px 8px; border: 3px solid #000; background: #0b1220; box-shadow: 5px 5px 0 #000, inset 0 0 0 2px #ffd45e; color: #f3f0d1; font-family: "Courier New", monospace; }
+.bat-mascot { flex: none; width: 64px; height: 64px; padding: 3px; border: 3px solid #000; background: #ffd45e; image-rendering: pixelated; }
+.bat-status-copy { display: grid; gap: 2px; min-width: 0; }
+.bat-status-copy span { color: #ffd45e; font: 700 10px "Courier New", monospace; letter-spacing: .16em; }
+.bat-status-copy strong { font: 900 15px "Courier New", monospace; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bat-status-copy small { color: #a9c2c0; font: 700 11px "Courier New", monospace; }
+.bat-status[data-mood="angry"] .bat-mascot { background: #ff7185; }
+.bat-status[data-mood="angry"] small { color: #ff9aa8; }
+.bat-status[data-mood="wary"] .bat-mascot { background: #b9c4cc; }
+.bat-status[data-mood="unsure"] .bat-mascot { background: #ffc857; }
+.bat-status[data-mood="happy"] small { color: #67e6aa; }
+.bat-mascot.is-reacting { animation: mascot-hop 360ms steps(3) both; }
+@keyframes mascot-hop { 0% { transform: translateY(0); } 40% { transform: translateY(-8px); } 100% { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .bat-mascot.is-reacting { animation: none; } }
+/* Square ear pixels: the ears keep the art's 34:7 shape, so they read as solid cowl ears, not thin lines. */
+.bat-phone-ears { top: auto; bottom: calc(100% - 3px); height: auto; aspect-ratio: 34 / 7; }
+.city-stats-dialog { margin-top: 72px; height: min(600px, calc(100dvh - 110px)); }
+.bat-status[data-mood="happy"] .bat-mascot { background: #67e6aa; } /* green: no known breach */
