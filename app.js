@@ -86,10 +86,12 @@ function loadModel(path) {
 
 const propAxisCorrection = new Map([
   ['Gotham_Crosswalk', -Math.PI / 2],
-  ['Gotham_Fire_Hydrant', -Math.PI / 2],
-  ['Gotham_Large_Tree', -Math.PI / 2],
-  ['Gotham_Stoplight', -Math.PI / 2],
-  ['Gotham_Street_Tree', -Math.PI / 2],
+  // These GLBs store their height along -Z (e.g. tree z from -4.07 to 0), so +90° about X stands them up.
+  // -90° turned them upside down (canopy at the bottom).
+  ['Gotham_Fire_Hydrant', Math.PI / 2],
+  ['Gotham_Large_Tree', Math.PI / 2],
+  ['Gotham_Stoplight', Math.PI / 2],
+  ['Gotham_Street_Tree', Math.PI / 2],
   // The lamp GLB has a baked -90° node rotation that tips its Y-up shaft onto its side.
   ['Lamp square shaft', Math.PI / 2],
 ]);
@@ -294,7 +296,7 @@ function renderDirectory() {
   list.replaceChildren();
   accounts.forEach((account) => {
     const row = document.createElement('li');
-    row.innerHTML = `<button type="button" class="account-row${account.id === selectedId ? ' is-selected' : ''}" data-id="${account.id}" aria-pressed="${account.id === selectedId}"><span class="row-glyph" aria-hidden="true">Ã¢Å’â€š</span><span class="row-copy"><strong>${escapeHtml(account.name)}</strong><small>${escapeHtml(account.district)} Ã‚Â· ${escapeHtml(account.label)}</small></span><i class="row-status status-${account.status}" aria-label="${account.status}"></i></button>`;
+    row.innerHTML = `<button type="button" class="account-row${account.id === selectedId ? ' is-selected' : ''}" data-id="${account.id}" aria-pressed="${account.id === selectedId}"><span class="row-glyph" aria-hidden="true">⌂</span><span class="row-copy"><strong>${escapeHtml(account.name)}</strong><small>${escapeHtml(account.district)} · ${escapeHtml(account.label)}</small></span><i class="row-status status-${account.status}" aria-label="${account.status}"></i></button>`;
     row.querySelector('button').addEventListener('click', () => selectAccount(account.id));
     list.append(row);
   });
@@ -306,7 +308,7 @@ function renderOverview() {
   document.querySelector('#clear-count').textContent = String(accounts.filter((account) => account.status === 'clear').length).padStart(2, '0');
   document.querySelector('#breached-count').textContent = String(accounts.filter((account) => account.status === 'breached').length).padStart(2, '0');
   document.querySelector('#unknown-count').textContent = String(accounts.filter((account) => account.status === 'unknown').length).padStart(2, '0');
-  document.querySelector('#last-check').textContent = `TODAY Ã‚Â· ${accounts.find((account) => account.checkedAt)?.checkedAt ?? 'NOT CHECKED'}`;
+  document.querySelector('#last-check').textContent = `TODAY · ${accounts.find((account) => account.checkedAt)?.checkedAt ?? 'NOT CHECKED'}`;
 }
 
 function showCityStats(accountId) {
@@ -373,7 +375,7 @@ function showCityStats(accountId) {
   });
 
   document.querySelector('#city-stats-title').textContent = 'Account overview';
-  document.querySelector('#city-stats-subtitle').textContent = account ? `Ward-wide overview Ã‚Â· opened from ${account.name}` : 'All monitored accounts';
+  document.querySelector('#city-stats-subtitle').textContent = account ? `Ward-wide overview · opened from ${account.name}` : 'All monitored accounts';
   document.querySelector('#city-stats-list-total').textContent = `${total} TOTAL`;
   document.querySelector('#city-stats').hidden = false;
   document.querySelector('#city-stats-close').focus();
@@ -396,14 +398,14 @@ document.addEventListener('keydown', (event) => {
 function renderDetails() {
   const account = accountsById.get(selectedId);
   if (!account) return;
-  document.querySelector('#report-id').textContent = account.id.toUpperCase().replace('-', 'Ã¢â‚¬â€');
+  document.querySelector('#report-id').textContent = account.id.toUpperCase().replace('-', '—');
   document.querySelector('#detail-name').textContent = account.name;
   document.querySelector('#detail-label').textContent = account.label;
   document.querySelector('#detail-source').textContent = account.source;
   document.querySelector('#detail-checked').textContent = account.checkedAt ?? 'Not checked';
   const statusNode = document.querySelector('#detail-status');
   statusNode.className = `report-status status-${account.status}`;
-  statusNode.innerHTML = `<span class="status-symbol">${account.status === 'clear' ? 'Ã¢Å“â€œ' : account.status === 'breached' ? '!' : '?'}</span><span>${statusText[account.status]}</span>`;
+  statusNode.innerHTML = `<span class="status-symbol">${account.status === 'clear' ? '✓' : account.status === 'breached' ? '!' : '?'}</span><span>${statusText[account.status]}</span>`;
   const incident = document.querySelector('#incident-block');
   const content = document.querySelector('#incident-content');
   if (account.status === 'breached' && account.breaches.length) {
@@ -480,7 +482,7 @@ function runChecksLegacy() {
   });
   renderOverview();
   renderDetails();
-  showToast('Demo checks complete Ã‚Â· fixture data');
+  showToast('Demo checks complete · fixture data');
 }
 
 function openCheckForm() {
@@ -551,7 +553,7 @@ function installCheck(result) {
   });
   renderOverview(); renderDetails();
   document.querySelector('#service-status').textContent = result.source.startsWith('Demo') ? 'OFFLINE DEMO' : result.status === 'unknown' ? 'CHECK UNAVAILABLE' : 'ACCOUNT VERIFIED';
-  showToast(result.status === 'unknown' ? (result.error || 'Check unavailable') : `Check complete Ã‚Â· ${accounts.length} accounts`);
+  showToast(result.status === 'unknown' ? (result.error || 'Check unavailable') : `Check complete · ${accounts.length} accounts`);
 }
 
 // Navbar check action opens the ownership-first check flow.
@@ -585,7 +587,7 @@ function showFeature(view) {
   document.querySelectorAll('.nav-link[data-view]').forEach((node) => node.classList.toggle('is-active', node.dataset.view === view));
   if (view === 'overview') { drawer.hidden = true; return; }
   drawer.hidden = false;
-  content.innerHTML = `<p class="eyebrow">BREACH CITY / DATA DESK</p><h2>${titles[view]}</h2><p class="drawer-summary">${view === 'accounts' ? `${accounts.length} services in this account check.` : view === 'inbox' ? 'Services found in welcome and account notification headers.' : 'Public breach activity by year from the Tiger Data catalog.'}</p><div id="feature-results" class="feature-results"><p class="drawer-empty">${view === 'timeline' ? 'Loading public timelineÃ¢â‚¬Â¦' : 'Loading account dataÃ¢â‚¬Â¦'}</p></div>`;
+  content.innerHTML = `<p class="eyebrow">BREACH CITY / DATA DESK</p><h2>${titles[view]}</h2><p class="drawer-summary">${view === 'accounts' ? `${accounts.length} services in this account check.` : view === 'inbox' ? 'Services found in welcome and account notification headers.' : 'Public breach activity by year from the Tiger Data catalog.'}</p><div id="feature-results" class="feature-results"><p class="drawer-empty">${view === 'timeline' ? 'Loading public timeline…' : 'Loading account data…'}</p></div>`;
   const results = document.querySelector('#feature-results');
   if (view === 'accounts') {
     results.innerHTML = accounts.length ? `<div class="feature-table"><div class="feature-table-head"><span>SERVICE</span><span>STATUS</span><span>SOURCE</span></div>${accounts.map((a) => `<button class="feature-table-row" type="button" data-account="${escapeHtml(a.id)}"><span><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(a.domain || a.label)}</small></span><b class="status-${a.status}">${a.status === 'clear' ? 'NO MATCH' : a.status.toUpperCase()}</b><small>${escapeHtml((a.foundIn || []).join(' + ') || a.source)}</small></button>`).join('')}</div>` : '<p class="drawer-empty">Run a check to populate the account directory.</p>';
