@@ -39,6 +39,13 @@ const states = city.accounts.map((a) => (a.breached ? "mine" : a.serviceBreaches
 assert.ok(states.includes("mine") && states.includes("service") && states.includes("ok"));
 assert.equal(city.accounts.find((a) => a.domain === "adobe.com").serviceBreaches[0].date, "2013-10-01");
 
+// Offline next steps: driven by what leaked, and honest when only the service was breached
+const { nextSteps } = await import("./checker.js");
+const pw = nextSteps("Adobe", ["Email addresses", "Passwords", "Phone numbers"]);
+assert.match(pw[0], /Change your Adobe password/);
+assert.ok(pw.some((s) => /SIM-swap/.test(s)) && pw.some((s) => /password manager/.test(s)));
+assert.match(nextSteps("Canva", ["Email addresses"], false)[0], /wasn't found in this leak/);
+
 // Inbox sender parsing: one account per service, earliest date, people skipped
 assert.deepEqual(sendersToAccounts([
   { from: "Netflix <info@mailer.netflix.com>", date: "2021-05-01" },
@@ -120,6 +127,14 @@ assert.equal((await fetch(`${base}/api/check`, { method: "POST", body: "{}" })).
 const g = await fetch(`${base}/auth/google`, { redirect: "manual" });
 if (!process.env.GOOGLE_CLIENT_ID) assert.equal(g.status, 503); // not configured
 else assert.ok(g.status === 302 && g.headers.get("location").startsWith("https://accounts.google.com/"));
+assert.equal((await post("/api/explain", { name: "x".repeat(500) })).status, 400); // validated
+const ex = await post("/api/explain", { name: "Adobe", date: "2013-10-01", exposedData: ["Passwords"], mine: true });
+if (!process.env.GEMINI_API_KEY) assert.equal(ex.status, 503); // frontend falls back to nextSteps()
+else {
+  const e = await ex.json();
+  assert.ok(ex.status === 200 && e.summary && e.steps.length, `gemini: ${ex.status} ${JSON.stringify(e)}`);
+  console.log(`gemini: ${e.summary.slice(0, 80)}…`);
+}
 const tl = await fetch(`${base}/api/timeline`);
 if (!process.env.DATABASE_URL) assert.equal(tl.status, 503); // not configured
 else {

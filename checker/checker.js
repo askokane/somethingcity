@@ -86,6 +86,26 @@ export function toAccounts(breaches, inbox = [], serviceMap = new Map()) {
   return accounts.sort((x, y) => rank(y) - rank(x) || x.name.localeCompare(y.name));
 }
 
+/**
+ * A short, calm to-do list for one breach, from what leaked. Works offline; use it when /api/explain (Gemini) isn't available.
+ * mine: true if the user's email was in this breach, false if only the service was breached.
+ */
+export function nextSteps(service, exposedData = [], mine = true) {
+  const has = (re) => exposedData.some((d) => re.test(d));
+  const steps = [];
+  if (!mine) steps.push(`Your email wasn't found in this leak, but if you had a ${service} account back then, change that password to be safe.`);
+  else if (has(/password/i)) steps.push(`Change your ${service} password, and the password on any other site where you reused it.`);
+  else steps.push(`Review your ${service} account for activity you don't recognize.`);
+  steps.push(`Turn on two-step verification (2FA) for ${service}.`);
+  if (has(/password/i)) steps.push("Use a password manager so every site gets its own unique password.");
+  if (has(/phone/i)) steps.push("Be wary of scam texts and calls, and ask your carrier for a SIM-swap PIN.");
+  if (has(/email/i)) steps.push(`Expect phishing emails that mention ${service}; sign in by typing the address, not by clicking links.`);
+  if (has(/date of birth|dates of birth|physical address|social security|government/i)) steps.push("Watch for identity-theft attempts; consider freezing your credit.");
+  if (has(/credit card|bank|payment/i)) steps.push("Check your card and bank statements, and ask your bank about a replacement card.");
+  if (has(/security question/i)) steps.push("Change any security questions that used the same answers elsewhere.");
+  return steps;
+}
+
 // Fictional services. Categories only: never leaked values.
 const FIXTURES = {
   "breached@demo.test": {

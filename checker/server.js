@@ -154,6 +154,49 @@ document.getElementById("out").textContent = r.status
   : (r.error ?? "Not signed in.");
 </script>`;
 
+// --- Gemini: plain-English "what this means for you" for one breach (Gemini prize) ---
+// Sends only public breach metadata (service, date, data types). Never an email, account list or inbox content.
+const explainCache = new Map(); // ponytail: unbounded, but keyed by public breach metadata (a few hundred at most)
+
+async function explain(body) {
+  const { name, date = null, exposedData = [], mine = true } = body;
+  const okText = (s, max) => typeof s === "string" && s.length > 0 && s.length <= max;
+  if (!okText(name, 100) || (date !== null && !okText(date, 20)) || !Array.isArray(exposedData) || exposedData.length > 30 ||
+      !exposedData.every((d) => okText(d, 60)) || typeof mine !== "boolean") return [400, { error: "Bad breach details." }];
+  if (!process.env.GEMINI_API_KEY) return [503, { error: "Explanations aren't configured." }];
+
+  const key = JSON.stringify([name, date, exposedData, mine]);
+  if (explainCache.has(key)) return [200, explainCache.get(key)];
+  const prompt = `Explain this data breach to a non-technical person, calmly and without hype.
+Service: ${name}
+Breach date: ${date ?? "unknown"}
+Data types exposed: ${exposedData.join(", ") || "unknown"}
+${mine ? "Their email address was found in this breach." : "The service was breached, but their email address was NOT found in the leaked data. Do not say their data leaked."}
+Return JSON: "summary" (2-3 sentences: what happened and what it means for them) and "steps" (3-5 short, concrete actions, most important first). No markdown.`;
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL || "gemini-2.5-flash"}:generateContent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: { type: "OBJECT", properties: { summary: { type: "STRING" }, steps: { type: "ARRAY", items: { type: "STRING" } } }, required: ["summary", "steps"] },
+      },
+    }),
+    signal: AbortSignal.timeout(20000),
+  }).catch(() => null);
+  console.log(`gemini ${res?.status ?? "no response"}`);
+  try {
+    const out = JSON.parse((await res.json()).candidates[0].content.parts[0].text);
+    if (typeof out.summary !== "string" || !Array.isArray(out.steps)) throw new Error();
+    const result = { summary: out.summary, steps: out.steps.map(String).slice(0, 6), source: "Gemini" };
+    explainCache.set(key, result);
+    return [200, result];
+  } catch {
+    return [502, { error: "Explanation unavailable right now." }]; // frontend falls back to nextSteps()
+  }
+}
+
 // --- Live check for the signed-in email ---
 
 async function check(req, body) {
@@ -202,6 +245,7 @@ export const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true }, { "set-cookie": cookie("bc_session", "", 0) });
     }
     if (path === "/api/check") return json(res, ...(await check(req, body)));
+    if (path === "/api/explain") return json(res, ...(await explain(body)));
 
     const email = normalizeEmail(body.email);
     if (!email) return json(res, 400, { error: "Enter a valid email address." });
@@ -218,6 +262,7 @@ if (import.meta.main) {
     console.log(`Breach City checker on http://localhost:${PORT}`);
     console.log(`  email codes: ${process.env.RESEND_API_KEY ? "sent with Resend" : "printed here (no RESEND_API_KEY)"}`);
     console.log(`  Google sign-in + inbox scan: ${process.env.GOOGLE_CLIENT_ID ? "on" : "off (no GOOGLE_CLIENT_ID)"}`);
-    console.log(`  Tiger Data timeline: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL)"}`);
+    console.log(`  Tiger Data timeline + service breaches: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL; using in-memory catalog)"}`);
+    console.log(`  Gemini explanations: ${process.env.GEMINI_API_KEY ? "on" : "off (no GEMINI_API_KEY; frontend uses nextSteps())"}`);
   });
 }
