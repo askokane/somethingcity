@@ -23,7 +23,8 @@ export function createCity(scene) {
   }
   const sea = createStylizedSea(islands);
   group.add(sea.root);
-  const coastReady = createCoastalScene().then(coast => { group.add(coast); return coast; });
+  let coastalRoot = null;
+  const coastReady = createCoastalScene().then(coast => { coastalRoot = coast; group.add(coast); return coast; });
   const bridgeReady = new GLTFLoader().loadAsync('./models/everything-else/bridge_gothic_suspension.glb').then(gltf => {
     const root = gltf.scene;
     root.name = 'Inter-island gothic bridge';
@@ -104,7 +105,7 @@ export function createCity(scene) {
     }
   }
   sync(new Map());
-  return { sync, group, ready, update(time) { sea.update(time); } };
+  return { sync, group, ready, update(time) { sea.update(time); coastalRoot?.userData.update?.(time); } };
 }
 
 export function landmarkLabel(name) {
