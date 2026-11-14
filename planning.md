@@ -69,21 +69,21 @@ Use color plus icons/labels so status is not communicated by color alone. Keep a
 
 ## Four-person parallel work plan
 
-Each stream owns its files and exposes a small agreed interface early. One person is the integrator/demo lead; the existing assignments remain intact.
+Each stream owns its files and exposes a small agreed interface early. Tai owns the supporting city world and UI visual design/assets; Daniel owns account-building models; Atharva owns frontend behavior and end-to-end integration.
 
 | Person | Workstream | Owns | Deliverable / handoff |
 |---|---|---|---|
-| 1 | Blender models — environment | City layout, ground, roads, shared scene scale/material conventions | Exported city environment asset and placement/scale notes; provide a placeholder scene immediately |
-| 2 | Blender models — buildings | Reusable account-building model plus clean/alert/unknown visual variants or material states | Exported building asset(s), origin/pivot conventions, and status-state mapping |
-| 3 | Account onboarding + breach checks | Account entry flow, validation/masking, provider or seeded fixture adapter, status/error handling | A typed function/interface returning account status and breach metadata; document provider limits and demo fallback |
-| 4 | Frontend integration + experience | App shell, city rendering/integration, account list, detail panel, status legend, demo flow, final integration | Working end-to-end browser demo connected to mock data first, then real checker where feasible |
+| Tai | City world, NPCs, streets, and UI visuals | Streets, NPCs, props, supporting environment, status/UI visual design and assets; shared scene conventions | Early city blockout, final supporting world assets, UI design/assets/specs, and account plot/scale notes |
+| Daniel | Account-building models | Reusable account-building model plus clean/alert/unknown visual variants or material states | Early placeholder and final building asset, origin/pivot conventions, and status-state mapping |
+| Justin | Account onboarding + breach checks | Account entry flow, validation/masking, provider or seeded fixture adapter, status/error handling | A typed function/interface returning account status and breach metadata; document provider limits and demo fallback |
+| Atharva | Frontend integration + experience | App shell, city rendering/integration, account list, detail panel, status legend, demo flow, final integration | Working end-to-end browser demo connected to mock data first, then real checker where feasible |
 
 ### Parallelization rules
 
 - Agree on the data contract and coordinate system at kickoff; do not wait for polished assets.
-- Person 4 starts with gray-box geometry and mock breach responses.
-- People 1 and 2 export early low-detail assets, then refine without changing agreed scale/origin.
-- Person 3 makes the checker callable behind a stable interface so Person 4 can integrate a mock implementation immediately.
+- Atharva starts with gray-box geometry and mock breach responses.
+- Tai and Daniel export early low-detail assets, then refine without changing agreed scale/origin. Tai keeps Daniel’s account plots clear and hands UI visual design/assets to Atharva; Daniel keeps building materials/state names compatible with Tai’s scene and UI conventions.
+- Justin makes the checker callable behind a stable interface so Atharva can integrate a mock implementation immediately.
 - Integrate at least once early, then freeze interfaces; late visual polish must not block the demo path.
 
 ## Shared data contract

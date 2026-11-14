@@ -1,14 +1,14 @@
 ﻿# Atharva — Overall Integration Instructions
 
 ## Mission
-Own the end-to-end Breach City experience and integrate the environment, account buildings, account checker, and interface into a reliable hackathon demo.
+Own the end-to-end Breach City experience and frontend implementation. Integrate Tai’s city world, NPCs, streets, and UI visual assets with Daniel’s account buildings and Justin’s account checker into a reliable hackathon demo.
 
 ## Step-by-step prompting workflow
 Use these prompts in order, keeping the shared contract and conventions visible to every contributor:
 1. **Set the shared interfaces:** “Turn the planning doc into a concise kickoff checklist. Confirm the `AccountCheck` type, asset format, scene scale/origin/orientation, state names, file ownership, and earliest handoffs with the team.”
 2. **Build the gray-box loop:** “Create the app shell with mock accounts and simple placeholder buildings. Implement add/select, run checks, status list/legend, and a detail panel using the shared contract.”
 3. **Integrate the checker:** “Connect the checker behind the same interface as the fixtures. Preserve the no-credentials demo path; show source and timestamp, and map errors or incomplete results to unknown.”
-4. **Integrate art assets:** “Import Tai’s environment and Daniel’s building asset using their documented transforms and material names. Verify multiple instances and all three states, retaining the gray-box fallback.”
+4. **Integrate art and UI assets:** “Import Tai’s streets, NPCs, supporting city assets, and UI visual specifications, plus Daniel’s building asset, using their documented transforms and material names. Implement the UI behavior in the frontend, verify multiple building instances and all three states, and retain the gray-box fallback.”
 5. **Complete and rehearse:** “Walk through the full user flow. Fix blockers, confirm privacy and uncertainty copy, reset/demo-data behavior, and prepare a 90-second demo script. List any remaining limitations clearly.”
 
 After each prompt, summarize what works, what is blocked, and the exact next handoff needed; freeze shared interfaces before final polish.
@@ -22,7 +22,7 @@ After each prompt, summarize what works, what is blocked, and the exact next han
 ## Scope
 - Build the main screen: city, account/status list or legend, add/check controls, and selected-building details.
 - Map each account result to a building and show clear, breached, and unknown states in both the city and text UI.
-- Integrate Tai's environment and Daniel's reusable building asset when available; preserve the gray-box fallback.
+- Implement the frontend from Tai’s UI visual design/assets; integrate Tai’s city world and Daniel’s reusable account buildings when available; preserve the gray-box fallback.
 - Display source and check time. Use precise language such as “No known match in this source.”
 - Make the demo resettable and ensure the fixture flow works without credentials or network access.
 - Prepare the short demo story and coordinate a final feature freeze.

@@ -1,7 +1,7 @@
 ﻿# Daniel — Blender Account Building Instructions
 
 ## Mission
-Create the reusable account-building asset for Breach City. Each monitored account maps to one building, and the app changes its appearance to reflect the account's breach-check status.
+Own the account-building models for Breach City. Each monitored account maps to one reusable building, and the app changes its appearance to reflect the account's breach-check status. Tai owns streets, NPCs, supporting city elements, and UI visual design/assets; Atharva owns frontend implementation.
 
 ## Step-by-step prompting workflow
 Use these prompts in order, carrying forward the conventions agreed with Tai and Atharva:
@@ -14,7 +14,7 @@ Use these prompts in order, carrying forward the conventions agreed with Tai and
 Keep account names and sensitive information out of the asset; retain a static version as a fallback.
 
 ## Coordinate with the team first
-- Coordinate with Tai and Atharva on scene scale, origin/pivot, orientation, export format, and material naming.
+- Coordinate with Tai on streets, reserved building plots, NPCs, palette, and scene scale; coordinate with Atharva on frontend import, origin/pivot, orientation, export format, and material naming.
 - Deliver a placeholder building quickly so Atharva can build the scene before the polished model is ready.
 
 ## Scope
