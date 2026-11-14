@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>City Planner</title>
+    <script type="importmap">
+      { "imports": {
+        "three": "../vendor/three/build/three.module.js",
+        "three/addons/": "../vendor/three/examples/jsm/"
+      } }
+    </script>
+    <style>
+      :root { color-scheme: dark; --bg: #0f1720; --panel: #16222e; --line: #2f4354; --ink: #e8eef0; --muted: #93a7b3; --gold: #ffd45e; --red: #ff7185; --amber: #ffc857; --green: #67e6aa; --grey: #8a99a6; }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--ink); font: 13px/1.45 "Courier New", monospace; }
+      .layout { display: grid; grid-template-columns: minmax(0, 1fr) 430px; height: 100vh; }
+      .stage { position: relative; overflow: hidden; }
+      .stage canvas { display: block; width: 100%; height: 100%; }
+      .labels { position: absolute; inset: 0; pointer-events: none; }
+      .label { position: absolute; transform: translate(-50%, -100%); white-space: nowrap; padding: 1px 4px; border: 1px solid var(--line); background: #0f1720d9; font-size: 10px; }
+      .label b { color: var(--gold); }
+      .label.landmark { border-color: var(--gold); color: var(--gold); font-weight: bold; }
+      .legend { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 12px; padding: 6px 10px; background: #0f1720d9; border: 1px solid var(--line); font-size: 11px; }
+      .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 4px; vertical-align: -1px; }
+      .title { position: absolute; left: 12px; top: 10px; padding: 6px 10px; background: #0f1720d9; border: 1px solid var(--line); }
+      .title strong { color: var(--gold); letter-spacing: .1em; }
+      aside { overflow: auto; border-left: 2px solid var(--line); background: var(--panel); padding: 14px; }
+      h2 { margin: 18px 0 8px; font-size: 12px; letter-spacing: .14em; color: var(--gold); }
+      h2:first-child { margin-top: 0; }
+      p.note { margin: 4px 0 10px; color: var(--muted); font-size: 11px; }
+      .vars { display: grid; grid-template-columns: 1fr 120px; gap: 6px 10px; align-items: center; }
+      .vars label { color: var(--muted); }
+      .vars input, .vars select { width: 100%; padding: 4px 6px; border: 1px solid var(--line); background: #0d1822; color: var(--ink); font: inherit; }
+      .vars output { color: var(--ink); }
+      table { width: 100%; border-collapse: collapse; font-size: 11px; }
+      th, td { padding: 4px 5px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { color: var(--muted); font-weight: normal; letter-spacing: .06em; position: sticky; top: 0; background: var(--panel); }
+      td.num { text-align: right; }
+      .tag { display: inline-block; padding: 0 4px; border: 1px solid currentColor; font-size: 10px; }
+      .state-breached { color: var(--red); } .state-service { color: var(--amber); } .state-clear { color: var(--green); }
+      .ok { color: var(--green); } .missing { color: var(--red); }
+      button { padding: 6px 10px; border: 1px solid var(--gold); background: transparent; color: var(--gold); font: inherit; cursor: pointer; }
+      button:hover { background: #ffd45e22; }
+      code { color: var(--gold); }
+      @media (max-width: 900px) { .layout { grid-template-columns: 1fr; grid-template-rows: 55vh auto; height: auto; } aside { border-left: 0; border-top: 2px solid var(--line); } }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <section class="stage" id="stage">
+        <div class="labels" id="labels"></div>
+        <div class="title"><strong>CITY PLANNER</strong> · blueprint, not the live app · <span id="source"></span></div>
+        <div class="legend">
+          <span><i style="background:#ff7185"></i>breached</span>
+          <span><i style="background:#ffc857"></i>service breached</span>
+          <span><i style="background:#67e6aa"></i>clear</span>
+          <span><i style="background:#ffd45e"></i>landmark (model)</span>
+          <span><i style="background:#8a99a6"></i>landmark (missing model)</span>
+          <span><i style="background:#3d5a3e"></i>park</span>
+        </div>
+      </section>
+      <aside>
+        <h2>TOWER HEIGHT = ACCOUNT AGE</h2>
+        <p class="note">Older account (first email from the site) = taller tower. Change a value and the city and table update.</p>
+        <div class="vars">
+          <label for="mode">Height rule</label>
+          <select id="mode">
+            <option value="tier">Tiers (checker's cityLayout 1–5)</option>
+            <option value="years">Continuous (floors per year)</option>
+          </select>
+          <label for="floorsPerTier">Floors per tier</label><input id="floorsPerTier" type="number" min="1" max="10" step="1" value="3" />
+          <label for="floorsPerYear">Floors per year</label><input id="floorsPerYear" type="number" min="0.2" max="5" step="0.1" value="1.2" />
+          <label for="minFloors">Min floors (newest)</label><input id="minFloors" type="number" min="1" max="20" step="1" value="2" />
+          <label for="maxFloors">Max floors (oldest)</label><input id="maxFloors" type="number" min="2" max="60" step="1" value="18" />
+          <label for="floorMeters">Floor height (m)</label><input id="floorMeters" type="number" min="2.5" max="5" step="0.1" value="3" />
+          <label for="now">"Today"</label><input id="now" type="date" />
+          <label for="grid">City grid (blocks)</label>
+          <select id="grid"><option value="3">3 × 3</option><option value="4" selected>4 × 4</option><option value="5">5 × 5</option></select>
+          <label>Scale</label><output id="scale"></output>
+        </div>
+
+        <h2>WEBSITE TOWERS <span id="towerCount"></span></h2>
+        <table>
+          <thead><tr><th>SITE</th><th>FIRST SEEN</th><th class="num">YRS</th><th class="num">TIER</th><th class="num">FLOORS</th><th class="num">M</th><th>STATE</th></tr></thead>
+          <tbody id="towers"></tbody>
+        </table>
+
+        <h2>BUILDING MODELS (FOR DANIEL)</h2>
+        <p class="note">Expected file in <code>models/buildings/</code>, target size at road scale (a street = 7 m two-lane road), and what data it shows. Missing models draw as grey boxes at the target size.</p>
+        <table>
+          <thead><tr><th>BUILDING</th><th>FILE</th><th>FOOTPRINT × HEIGHT</th><th>SHOWS</th></tr></thead>
+          <tbody id="models"></tbody>
+        </table>
+
+        <h2>VARIABLES (COPY FOR THE APP)</h2>
+        <p class="note">The current settings and layout as JSON, for <code>app.js</code>.</p>
+        <button id="copy" type="button">Copy settings JSON</button>
+        <pre id="json" style="white-space:pre-wrap;color:var(--muted);font-size:10px"></pre>
+      </aside>
+    </div>
+    <script type="module" src="./planner.js"></script>
+  </body>
+</html>
