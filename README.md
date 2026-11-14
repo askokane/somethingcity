@@ -28,6 +28,7 @@ The checker listens on port 8787. Configure optional credentials in the gitignor
 
 - Drag to pan and scroll to zoom. Use **Reset view** to return to the city overview.
 - Select a directory entry or a building to open its account report and focus the camera.
+- Select **GCPD Headquarters** to open the mission board. Review prioritized fixes, open the affected service website, and mark completed actions. Open, Completed, and All filters show progress saved in this browser, separately for each checked identity. Completion is self-reported and does not alter breach records. New breach incidents create fresh tasks.
 - Open the account directory, inbox scan, or breach timeline from the navigation.
 - Use **Check** to verify an email address. The demo addresses `city@demo.test`, `breached@demo.test`, `clear@demo.test`, and `unknown@demo.test` use offline fixtures. **`city@demo.test` is the judged demo:** 20 real services with real breach history, fully offline.
 - Use **Google sign in** to verify ownership and optionally scan Gmail headers when OAuth is configured.

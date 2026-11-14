@@ -4,6 +4,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X } from './city-layout.js';
 import { scatterSlotOrder, freshPlacementSeed, seededRandom as placementRandomGenerator } from './city-scatter.js';
 import { checkAccount, checkSignedIn } from './checker/checker.js';
+import { buildMissions, readProgress, saveProgress, serviceUrl } from './mission-board.js';
 
 const CHECKER_API = 'http://localhost:8787';
 let currentCheck = null;
@@ -610,6 +611,10 @@ function showCityMood() {
 }
 
 function openPhone({ eyebrow, title, subtitle, cards, counts = null, listTitle, rows, note, focus, zoom = camera.zoom, mood = 'happy' }) {
+  document.querySelector('.mission-board')?.remove();
+  document.querySelector('.city-stats-dialog').classList.remove('is-mission-board');
+  document.querySelector('#city-stats-list').hidden = false;
+  document.querySelector('#city-stats-list-name').parentElement.hidden = false;
   setMascotMood(mood, title);
   closeCardDetails();
   if (focus) {
@@ -751,8 +756,62 @@ function showAccountReport(accountId) {
   });
 }
 
+let missionFilter = 'open';
+const missionSession = new Map();
+function showMissionBoard({ focus = true } = {}) {
+  const scope = currentCheck?.id || 'sample-city';
+  let storage;
+  try { storage = window.localStorage; } catch { /* Private mode: keep progress for this session. */ }
+  const progress = missionSession.get(scope) || readProgress(storage, scope);
+  missionSession.set(scope, progress);
+  const tasks = buildMissions(accounts);
+  const completed = tasks.filter(task => progress[task.key]).length;
+  const urgent = tasks.filter(task => task.priority === 0 && !progress[task.key]).length;
+  const boardScroll = document.querySelector('.mission-list')?.scrollTop || 0;
+  const landmark = landmarks.find(item => item.name === 'GCPD Headquarters');
+  openPhone({ eyebrow: 'GCPD HEADQUARTERS · OPERATIONS', title: 'Mission board',
+    subtitle: 'Your next steps toward a better protected city.',
+    cards: [['OPEN', tasks.length - completed, 'total'], ['URGENT', urgent, 'breached'], ['DONE', completed, 'clear']],
+    listTitle: 'MISSIONS', rows: [],
+    note: 'Completion is self-reported. Breach City does not change your accounts or erase breach history. Progress is saved in this browser.',
+    focus: focus && landmark ? blocks[landmark.block] : null, mood: urgent ? 'wary' : 'normal' });
+  document.querySelector('.city-stats-dialog').classList.add('is-mission-board');
+  document.querySelector('#city-stats-list').hidden = true;
+  document.querySelector('#city-stats-list-name').parentElement.hidden = true;
+  const board = document.createElement('section');
+  board.className = 'mission-board';
+  const pct = tasks.length ? Math.round(completed / tasks.length * 100) : 0;
+  board.innerHTML = `<div class="mission-progress"><span>${completed} of ${tasks.length} missions complete</span><strong>${pct}%</strong><progress max="${tasks.length || 1}" value="${completed}" aria-label="Mission completion"></progress></div><div class="mission-filters" role="group" aria-label="Filter missions">${[['open', 'Open'], ['done', 'Completed'], ['all', 'All']].map(([key, label]) => `<button type="button" data-filter="${key}" aria-pressed="${missionFilter === key}">${label}</button>`).join('')}</div><p class="mission-announcement" role="status" aria-live="polite"></p><div class="mission-list"></div>`;
+  const list = board.querySelector('.mission-list');
+  const visible = tasks.filter(task => missionFilter === 'all' || (missionFilter === 'done' ? !!progress[task.key] : !progress[task.key]));
+  visible.forEach(task => {
+    const done = !!progress[task.key];
+    const card = document.createElement('article');
+    card.className = `mission-card${done ? ' is-complete' : ''}`;
+    const url = serviceUrl(task.domain);
+    card.innerHTML = `<div class="mission-meta"><span class="mission-priority priority-${task.priority}">${done ? 'COMPLETED' : ['URGENT', 'HIGH PRIORITY', 'FOLLOW UP'][task.priority]}</span><button class="mission-report" type="button">${escapeHtml(task.account)} ↗</button></div><h3>${escapeHtml(task.title)}</h3><p class="mission-reason">${escapeHtml(task.reason)}</p><p>${escapeHtml(task.detail)}</p><div class="mission-actions">${url ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(task.account)} website in a new tab">Open ${escapeHtml(task.account)} ↗</a>` : '<span class="mission-no-link">No verified service domain available</span>'}<button type="button" class="mission-complete">${done ? 'Undo completion' : 'Mark complete'}</button></div>${url ? '<small class="mission-link-note">Opens the service website. Find password and MFA options in account security settings.</small>' : ''}`;
+    card.querySelector('.mission-report').addEventListener('click', () => showAccountReport(task.accountId));
+    card.querySelector('.mission-complete').addEventListener('click', () => {
+      if (done) delete progress[task.key]; else progress[task.key] = new Date().toISOString();
+      const saved = saveProgress(storage, scope, progress);
+      showMissionBoard({ focus: false });
+      document.querySelector('.mission-announcement').textContent = `${task.account}: ${done ? 'mission reopened' : 'marked complete'}.${saved ? '' : ' Browser storage is unavailable; progress lasts for this session.'}`;
+      document.querySelector(`.mission-filters [data-filter="${missionFilter}"]`).focus();
+    });
+    list.append(card);
+  });
+  if (!visible.length) list.innerHTML = `<div class="mission-empty"><strong>${!tasks.length ? 'No missions to assign' : missionFilter === 'done' ? 'No completed missions yet' : 'All caught up'}</strong><p>${!tasks.length ? 'No known exposure tasks in the current results. Unavailable checks will still need follow-up.' : missionFilter === 'done' ? 'Complete a task after taking action on the service website.' : 'Completed actions stay in the Completed tab. Recorded breaches remain in your reports.'}</p></div>`;
+  board.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => {
+    missionFilter = button.dataset.filter; showMissionBoard({ focus: false });
+    document.querySelector(`.mission-filters [data-filter="${missionFilter}"]`).focus();
+  }));
+  document.querySelector('#city-stats-note').before(board);
+  list.scrollTop = boardScroll;
+}
+
 // Fixed landmarks report on the whole ward.
 const landmarkReports = {
+  gcpd: () => showMissionBoard(),
   wayne: () => openPhone({
     eyebrow: 'WAYNE TOWER · ACCOUNT MONITOR',
     title: 'Account overview',
@@ -814,6 +873,12 @@ document.querySelector('#city-stats').addEventListener('click', (event) => {
 });
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && !document.querySelector('#city-stats').hidden) closeCityStats();
+  if (event.key === 'Tab' && !document.querySelector('#city-stats').hidden) {
+    const items = [...document.querySelectorAll('.city-stats-dialog button, .city-stats-dialog a[href]')].filter(item => item.getClientRects().length);
+    const first = items[0], last = items.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  }
 });
 
 function renderDetails() {
@@ -956,6 +1021,7 @@ async function submitCheck(event) {
 }
 
 function installCheck(result) {
+  if (!document.querySelector('#city-stats').hidden) closeCityStats();
   currentCheck = result;
   const stamp = result.checkedAt ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(result.checkedAt)) : null;
   const entries = result.accounts.length ? result.accounts : [{ name: result.label, domain: '', breached: false, breaches: [], foundIn: [], firstSeen: null }];
@@ -1139,7 +1205,7 @@ renderer.domElement.addEventListener('pointerup', (event) => {
     showAccountReport(node.userData.accountId);
   } else if (node?.userData.landmark) {
     const name = node.userData.landmark;
-    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham' }[name];
+    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham', 'GCPD Headquarters': 'gcpd' }[name];
     if (key) landmarkReports[key]();
     else openPhone({ eyebrow: name.toUpperCase(), title: name, subtitle: 'City-wide account overview', cards: [['ACCOUNTS MONITORED', accounts.length, 'total']], counts: countStatuses(accounts), listTitle: 'ACCOUNT STATUS', rows: accounts.map(a => [a.name, a.district, accountBadge(a), a.status]), note: 'Landmark model pending. No match means no known match in this source.', focus: landmarks.find(l => l.name === name) ? blocks[landmarks.find(l => l.name === name).block] : blocks[0] });
   }
@@ -1172,4 +1238,4 @@ renderOverview();
 renderDetails();
 animate();
 
-export { scene, camera, controls, renderer, accounts, renderedBuildings, landmarkRoots, installCheck, resetDemo };
+export { scene, camera, controls, renderer, accounts, renderedBuildings, landmarkRoots, installCheck, resetDemo, showMissionBoard };
