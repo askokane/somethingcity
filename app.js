@@ -558,6 +558,7 @@ function renderDirectory() {
 }
 
 function renderOverview() {
+  if (document.querySelector('#city-stats').hidden) showCityMood();
   document.querySelector('#clear-count').textContent = String(accounts.filter((account) => account.status === 'clear').length).padStart(2, '0');
   document.querySelector('#breached-count').textContent = String(accounts.filter((account) => account.status === 'breached').length).padStart(2, '0');
   document.querySelector('#unknown-count').textContent = String(accounts.filter((account) => account.status === 'unknown').length).padStart(2, '0');
@@ -572,7 +573,87 @@ const countStatuses = (list) => ({
 });
 
 // The phone dialog is one template; each building fills it with its own report.
-function openPhone({ eyebrow, title, subtitle, cards, counts = null, listTitle, rows, note, focus, zoom = camera.zoom }) {
+// 8-bit bat-hero mascot on the bat-phone's corner: an original 16x16 pixel drawing, one character per pixel.
+// K cowl, B cowl highlight, W eyes, S face. Each mood swaps the eyes and mouth.
+const MASCOT_COLORS = { K: '#1a2233', B: '#33456a', W: '#e9f7ff', S: '#f1c79c', M: '#2a1414', T: '#fffdf2', R: '#d6404a' };
+const MASCOT_HEAD = [
+  '..KK........KK..',
+  '..KK........KK..',
+  '..KKK......KKK..',
+  '.KKKKKKKKKKKKKK.',
+  '.KKBBKKKKKKBBKK.',
+  '.KKKKKKKKKKKKKK.',
+  '.KKKKKKKKKKKKKK.',
+  '.KKKKKKKKKKKKKK.',
+  '.KKKKKKKKKKKKKK.',
+  '.KKSSSSSSSSSSKK.',
+  '.KSSSSSSSSSSSSK.',
+  '.KSSSSSSSSSSSSK.',
+  '.KSSSSSSSSSSSSK.',
+  '..SSSSSSSSSSSS..',
+  '...SSSSSSSSSS...',
+];
+// [color, x, y] pixels drawn over the head for each mood.
+const px = (color, cells) => cells.map(([x, y]) => [color, x, y]);
+const OPEN_EYES = px('W', [[3, 6], [4, 6], [5, 6], [10, 6], [11, 6], [12, 6]]);
+const MASCOT_MOODS = {
+  happy: [...OPEN_EYES, ...px('M', [[4, 10], [11, 10], [5, 11], [10, 11], [6, 12], [7, 12], [8, 12], [9, 12]]), ...px('T', [[6, 11], [7, 11], [8, 11], [9, 11]])],
+  angry: [
+    // Eyes slant down toward the nose; teeth clenched in a box.
+    ...px('W', [[3, 6], [4, 6], [4, 7], [5, 7], [12, 6], [11, 6], [11, 7], [10, 7]]),
+    ...px('M', [[4, 10], [5, 10], [6, 10], [7, 10], [8, 10], [9, 10], [10, 10], [11, 10], [4, 11], [11, 11], [4, 12], [5, 12], [6, 12], [7, 12], [8, 12], [9, 12], [10, 12], [11, 12], [7, 11]]),
+    ...px('T', [[5, 11], [6, 11], [8, 11], [9, 11], [10, 11]]),
+  ],
+  normal: [...OPEN_EYES, ...px('M', [[6, 11], [7, 11], [8, 11], [9, 11]])],
+  wary: [...px('W', [[3, 7], [4, 7], [5, 7], [10, 7], [11, 7], [12, 7]]), ...px('M', [[5, 11], [6, 11], [7, 11], [8, 11], [9, 11], [10, 11]])],
+  unsure: [...OPEN_EYES, ...px('W', [[12, 5]]), ...px('M', [[5, 11], [6, 12], [7, 11], [8, 12], [9, 11], [10, 12]])],
+};
+const MASCOT_LABELS = { normal: 'Batman is calm, watching over Gotham', happy: 'Batman is smiling: no known breach', angry: 'Batman is gritting his teeth: breached', wary: 'Batman looks wary: only old breaches', unsure: 'Batman looks unsure: could not check' };
+const BAT_EMBLEM = ['YY...Y.Y...YY', 'YYYY.YYY.YYYY', 'YYYYYYYYYYYYY', '.YYYYYYYYYYY.', '..YY.YYY.YY..', '......Y......'];
+function pixelRects(rows, colors) {
+  return rows.flatMap((row, y) => [...row].map((key, x) => (colors[key] ? `<rect x="${x}" y="${y}" width="1" height="1" fill="${colors[key]}"/>` : ''))).join('');
+}
+document.querySelector('#bat-emblem').innerHTML = pixelRects(BAT_EMBLEM, { Y: '#0b0d12' });
+// Cowl ears on the bat-phone: outer edge straight up, inner edge sloping in, yellow outline around black.
+const EAR_ROWS = Array.from({ length: 7 }, (_, row) => {
+  const cells = Array(34).fill('.');
+  const width = row + 2;
+  for (let i = 0; i < width; i++) {
+    const edge = i === 0 || i === width - 1 || row === 0;
+    cells[2 + i] = edge ? 'Y' : 'K';
+    cells[31 - i] = edge ? 'Y' : 'K';
+  }
+  return cells.join('');
+});
+document.querySelector('#bat-phone-ears').innerHTML = pixelRects(EAR_ROWS, { Y: '#ffd45e', K: '#07090d' });
+const MOOD_TEXT = { normal: 'Watching over Gotham', happy: 'No known breach', angry: 'Breached: act now', wary: 'Only old breaches', unsure: "Couldn't check" };
+// The bottom-left status card: a title and the mascot's mood (with its line of text).
+function setMascotMood(mood, title = 'Gotham', detail = MOOD_TEXT[mood]) {
+  document.querySelector('#bat-status').dataset.mood = mood;
+  document.querySelector('#bat-status-title').textContent = title;
+  document.querySelector('#bat-status-detail').textContent = detail;
+  const mascot = document.querySelector('#bat-mascot');
+  const face = MASCOT_MOODS[mood].map(([key, x, y]) => `<rect x="${x}" y="${y}" width="1" height="1" fill="${MASCOT_COLORS[key]}"/>`).join('');
+  mascot.innerHTML = pixelRects(MASCOT_HEAD, MASCOT_COLORS) + face;
+  mascot.setAttribute('aria-label', MASCOT_LABELS[mood]);
+  mascot.dataset.mood = mood;
+  mascot.classList.remove('is-reacting');
+  void mascot.getBoundingClientRect(); // restart the hop
+  mascot.classList.add('is-reacting');
+}
+// With no report open, the card shows the whole city: any breach beats old breaches beats unchecked beats clear.
+function showCityMood() {
+  const breached = accounts.filter((account) => account.status === 'breached').length;
+  const historical = accounts.filter((account) => account.status === 'clear' && account.historical?.length).length;
+  const unknown = accounts.filter((account) => account.status === 'unknown').length;
+  if (breached) setMascotMood('angry', 'Gotham', `${breached} breached site${breached === 1 ? '' : 's'}: act now`);
+  else if (historical) setMascotMood('wary', 'Gotham', `${historical} site${historical === 1 ? '' : 's'} with old breaches`);
+  else if (unknown) setMascotMood('unsure', 'Gotham', `${unknown} site${unknown === 1 ? '' : 's'} couldn't be checked`);
+  else setMascotMood('happy', 'Gotham', `${accounts.length} sites, no known breach`);
+}
+
+function openPhone({ eyebrow, title, subtitle, cards, counts = null, listTitle, rows, note, focus, zoom = camera.zoom, mood = 'happy' }) {
+  setMascotMood(mood, title);
   closeCardDetails();
   if (focus) {
     const cameraRight = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
@@ -709,6 +790,7 @@ function showAccountReport(accountId) {
       : account.status === 'clear' ? 'No match means no known match in this source, not a guarantee.' : `Source: ${account.source || 'breach check'} · checked ${account.checkedAt || 'recently'}`,
     focus: slots[account.slot],
     zoom: FOCUS_ZOOM,
+    mood: account.status === 'breached' ? 'angry' : account.status === 'unknown' ? 'unsure' : account.historical.length ? 'wary' : 'happy',
   });
 }
 
@@ -724,6 +806,7 @@ const landmarkReports = {
     rows: accounts.map((account) => [account.name, account.district, accountBadge(account), account.status]),
     note: 'No match means no known match in this sample source.',
     focus: blocks[0],
+    mood: 'normal', // Wayne Tower is home base: calm whatever the city's state
   }),
   arkham: () => {
     const breached = accounts.filter((account) => account.status === 'breached');
@@ -736,6 +819,7 @@ const landmarkReports = {
       rows: breached.map((account) => [account.name, account.breaches.map((breach) => `${breach.name} (${breach.date || 'date unknown'})`).join(', ') || 'Breach details unavailable', 'BREACH', 'breached']),
       note: 'Change the password on each of these sites, and anywhere you reused it.',
       focus: blocks[7],
+      mood: breached.length ? 'angry' : 'happy',
     });
   },
   ace: () => {
@@ -754,11 +838,13 @@ const landmarkReports = {
       rows,
       note: 'Includes historical breaches: leaked data stays leaked. Passwords and phone numbers are the most urgent to change.',
       focus: blocks[2],
+      mood: rows.length ? 'angry' : 'happy',
     });
   },
 };
 
 function closeCityStats() {
+  showCityMood();
   closeCardDetails();
   document.querySelector('#city-stats').hidden = true;
   const selected = document.querySelector(`#account-list [data-id="${selectedId}"]`);

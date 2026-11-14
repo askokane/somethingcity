@@ -45,3 +45,44 @@ After each prompt, summarize what works, what is blocked, and the exact next han
 - Clear, breached, and unknown states all work through the same data contract.
 - Fixture demo survives missing provider credentials and network failures.
 - The app starts cleanly and the demo can be completed in about 90 seconds.
+
+## Next: map density (final project)
+
+Goal: a denser, livelier Gotham that reads like a real city map: a dense downtown of website towers, low housing and parks around it, water and bridges at the edges. Daniel's new landmark models aren't pushed yet; build the layout so they drop in by file name.
+
+### Where things are (Justin's branch `justin/fixed-landmarks`)
+Run `serve.ps1`, then open **http://localhost:8000/** (not `127.0.0.1`).
+
+- **City planner:** `http://localhost:8000/planner/index.html` is a blueprint of the city. It covers the grid size, landmark placement, tower height by account age, and the model file names and road-scale sizes Daniel is building to. Missing models draw as grey boxes. Use it to try layouts before touching `app.js`; **Copy settings JSON** exports the result.
+- **Layout, in `app.js`:**
+  - `blocks` lays out the 3×3 grid of block centers, 12 units apart.
+  - `landmarkBlocks` says which block holds which landmark.
+  - `PLOT_OFFSETS`, `slots` and `ACCOUNT_FOOTPRINT` give the 2×2 website plots per block.
+- **Scale, in `app.js`:**
+  - `UNITS_PER_METER` and `meters()`: a street is 3 units, a 7 m two-lane road.
+  - `FLOOR`: a 3 m storey. Size everything new with these, never by eye.
+- **Towers:**
+  - `addAccountBuilding()` builds the website towers.
+  - The plan is height by account age (older account = taller). The checker already gives a 1–5 tier from `firstSeen` (`cityLayout()` in `checker/checker.js`), and the planner shows both a tier rule and a floors-per-year rule.
+- **Landmarks:** `landmarkScale` and the model list in `loader.load('./models/buildings/…')`.
+- **Props and parks:**
+  - `addCityProps()` places the stoplights, lamps, hydrants and crosswalks.
+  - `addPark()` builds a walled park with trees in mixed sizes and bushes.
+  - `syncPlotParks()` turns every empty website plot into a park and re-runs when accounts change.
+  - `scaleForHeight()` sizes any model by its real height in meters.
+  - `riverTest()` tells you whether a point is in the river, so nothing gets placed on the water.
+- **Camera:** `viewHeight` in `resizeScene()`, plus `controls.target` and `FOCUS_ZOOM`. Re-frame these if the map grows.
+
+### Suggested order
+1. **Grow the grid.** The planner shows 4×4 is the first size that fits 20 towers plus all 8 landmarks (3×3 can't). Make `blocks` and `landmarkBlocks` data-driven (grid size → blocks; landmarks placed back to front so tall ones hide the least), and keep `slots` derived from them.
+2. **Fill the space between.** Low housing and shops on non-landmark, non-account blocks and block edges. Use `THREE.InstancedMesh` for repeated houses: hundreds of separate clones will drop the frame rate. The grey filler buildings from the old environment GLB were removed because they clipped the plots, so don't bring them back.
+3. **Density by account count.** More accounts means a denser downtown; fewer means more parks and housing (`syncPlotParks()` already handles empty plots).
+4. **Edges.** Water around the island, bridges, maybe a beach. The river and bridge come from `models/everything-else/gotham_ward_environment.glb`.
+5. **Drop in Daniel's models** when he pushes them: `gotham_bank.glb`, `gcpd_hq.glb`, `cobblepot_manor.glb`, `blackgate_penitentiary.glb` and `elliot_memorial.glb` in `models/buildings/`. Target sizes are in the planner's model table. What each landmark shows is in `checker/README.md` ("The 8 landmarks").
+
+### Keep working
+- **Status card:** the bottom-left bat-status card follows the city's or the open report's mood.
+- **Bat-phone reports:** each building opens its own report.
+- **Breach history:** breaches older than 12 months move to History and the site goes calm.
+- **Rooftop villains:** they stand on breached towers.
+- After any layout change, check that clicking a tower, a landmark and a directory row still opens the right report and flies the camera to it.
