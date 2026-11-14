@@ -60,9 +60,9 @@ def box(parent,name,x,y,z,w,h,d,material):
     v=[(x+sx*w/2,y+sy*h/2,z+sz*d/2) for sx,sy,sz in [(-1,-1,-1),(1,-1,-1),(1,-1,1),(-1,-1,1),(-1,1,-1),(1,1,-1),(1,1,1),(-1,1,1)]]
     return mesh(parent,name,v,[(0,3,2,1),(4,5,6,7),(0,1,5,4),(1,2,6,5),(2,3,7,6),(3,0,4,7)],material)
 def hull(parent,name,L,B,H,material='hull'):
-    # Faceted pointed bow, flat transom, and a narrow keel; sits on Y=0.
-    x=L/2; z=B/2; shoulder=L*.24
-    v=[(-x,0,0),(x*.72,0,-z),(x,0,-z*.52),(x,0,z*.52),(x*.72,0,z),(-x,0,0),
+    # Faceted pointed bow, closed flat transom, and a narrow keel; sits on Y=0.
+    x=L/2; z=B/2
+    v=[(-x,0,-z*.70),(x*.72,0,-z),(x,0,-z*.52),(x,0,z*.52),(x*.72,0,z),(-x,0,z*.70),
        (-x*.84,H,-z*.70),(x*.60,H,-z),(x*.83,H,-z*.48),(x*.83,H,z*.48),(x*.60,H,z),(-x*.84,H,z*.70),
        (-x*.70,H*.12,0),(x*.65,H*.12,0)]
     faces=[(0,6,7,1),(1,7,8,2),(2,8,9,3),(3,9,10,4),(4,10,11,5),
@@ -154,8 +154,8 @@ for x in [-.65,.45]: box(r,'Rowboat_cross_seat',x,.51,0,.13,.12,1.0,'wood2')
 box(r,'Rowboat_center_thwart',-.05,.51,0,.13,.12,.86,'pale')
 
 # Large, distant container ship silhouette with readable stacked cargo.
-r=root('Horizon_Container_Ship_Narrows','Horizon hero ship',28,8.2); fleet.append(r); hull(r,'Container_ship_hull',28,8.2,1.65,'hull')
-box(r,'Container_ship_deck',-1.4,1.78,0,22,.2,7.5,'wood')
+r=root('Horizon_Container_Ship_Narrows','Horizon hero ship',28,8.2); fleet.append(r); hull(r,'Container_ship_hull',28,8.2,1.9,'hull')
+box(r,'Container_ship_deck',-1.4,1.98,0,22, .2,7.5,'wood')
 for row,z in enumerate([-2.25,0,2.25]):
     for col,x in enumerate([-8.7,-6.0,-3.3,-.6,2.1,4.8,7.5]):
         color=['rust','teal','slate','pale'][(row*3+col)%4]
