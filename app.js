@@ -6,7 +6,9 @@ import { scatterSlotOrder, freshPlacementSeed, seededRandom as placementRandomGe
 import { checkAccount, checkSignedIn } from './checker/checker.js';
 import { buildMissions, readProgress, saveProgress, serviceUrl } from './mission-board.js';
 
-const CHECKER_API = 'http://localhost:8787';
+// Frontend and checker share an origin in production (Caddy proxies /api and /auth).
+// Leave the base empty so browser requests stay on the current host.
+const CHECKER_API = '';
 let currentCheck = null;
 let verifiedEmail = '';
 let signedIn = false;
