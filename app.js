@@ -327,7 +327,12 @@ function finishInitialLoad() {
   document.querySelector('#loading-overlay small').textContent = 'Buildings and street models ready';
 }
 
-city.ready.then(async () => { await addCityProps(city.group); environmentReady = true; finishInitialLoad(); }).catch(error => { console.error('Coastal assets failed to load', error); environmentReady = true; showToast('Coastal props unavailable; the city and sea are ready.'); finishInitialLoad(); });
+city.ready.then(async ({ failures }) => {
+  try { await addCityProps(city.group); }
+  catch (error) { failures.push({ asset: 'street props', error }); }
+  for (const failure of failures) console.error(`Failed to load ${failure.asset}`, failure.error);
+  if (failures.length) showToast(`Could not load ${failures.map(f => f.asset).join(', ')}. Reload to retry.`);
+}).finally(() => { environmentReady = true; finishInitialLoad(); });
 
 loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
   const variants = await Promise.all([

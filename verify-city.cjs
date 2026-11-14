@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const assert = require('node:assert/strict');
 (async () => {
   const tabs = await fetch('http://localhost:9222/json').then(r => r.json());
   const tab = tabs.find(t => t.type === 'page' && t.url.includes(':8000'));
@@ -6,7 +7,7 @@ const fs = require('node:fs');
   await new Promise(r => ws.addEventListener('open', r, { once: true }));
   let id = 0; const pending = new Map();
   ws.onmessage = event => { const message = JSON.parse(event.data); if (message.id) { pending.get(message.id)?.(message); pending.delete(message.id); } };
-  const send = (method, params = {}) => new Promise(resolve => { const key = ++id; pending.set(key, resolve); ws.send(JSON.stringify({ id: key, method, params })); });
+  const send = (method, params = {}) => new Promise((resolve, reject) => { const key = ++id; pending.set(key, message => message.error ? reject(new Error(method + ': ' + message.error.message)) : resolve(message)); ws.send(JSON.stringify({ id: key, method, params })); });
   const evaluate = async expression => {
     const r = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
     if (r.result.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails));
@@ -21,9 +22,46 @@ const fs = require('node:fs');
     await new Promise(r => setTimeout(r, 1000));
   }
   if (!ready) throw new Error('City failed to finish loading');
+  await evaluate(`window.cityTestPick = async (kind, index = 0) => {
+    const app = await import('./app.js'), THREE = await import('three');
+    const roots = [...app.renderedBuildings.values(), ...app.landmarkRoots];
+    const root = kind === 'tower' ? [...app.renderedBuildings.values()][index] : app.landmarkRoots[index];
+    app.scene.updateMatrixWorld(true); app.camera.updateMatrixWorld(true);
+    const rect = app.renderer.domElement.getBoundingClientRect();
+    const ray = new THREE.Raycaster(), point = new THREE.Vector3();
+    const meshes = []; root.traverse(node => { if (node.isMesh) meshes.push(node); });
+    for (const mesh of meshes) {
+      const positions = mesh.geometry.attributes.position, indices = mesh.geometry.index;
+      const count = indices ? indices.count : positions.count;
+      const step = Math.max(3, Math.floor(count / 180 / 3) * 3);
+      for (let i = 0; i + 2 < count; i += step) {
+        point.set(0,0,0);
+        for (let j = 0; j < 3; j++) point.add(new THREE.Vector3().fromBufferAttribute(positions, indices ? indices.getX(i+j) : i+j));
+        point.divideScalar(3).applyMatrix4(mesh.matrixWorld).project(app.camera);
+        const x = rect.left + (point.x+1)*rect.width/2, y = rect.top + (1-point.y)*rect.height/2;
+        if (point.z < -1 || point.z > 1 || document.elementFromPoint(x,y) !== app.renderer.domElement) continue;
+        ray.setFromCamera(new THREE.Vector2(point.x,point.y),app.camera);
+        let hit = ray.intersectObjects(roots,true)[0]?.object;
+        while (hit && hit !== root) hit = hit.parent;
+        if (hit === root) return {x,y};
+      }
+    }
+    throw new Error('No visible canvas surface found for '+root.name);
+  }`);
   console.log(await evaluate(`(async () => {
     const app = await import('./app.js'); const layout = await import('./city-layout.js');
     const coastalPlan = await import('./coastal-plan.js');
+    const bridgeModel = app.scene.getObjectByName('Inter-island gothic bridge');
+    if (!bridgeModel || !bridgeModel.getObjectByName('Bridge_Gothic_Suspension')) throw new Error('Blender bridge did not load');
+    if (bridgeModel.getObjectByName('Cube')) throw new Error('Bridge export contains the startup cube');
+    if (app.scene.getObjectByName('Inter-island bridge placeholder')) throw new Error('Placeholder bridge remains');
+    const THREE = await import('three');
+    const bridgeBounds = new THREE.Box3().setFromObject(bridgeModel);
+    if (Math.abs(bridgeBounds.min.x - (layout.bridge.x - layout.bridge.length / 2)) > .2 || Math.abs(bridgeBounds.max.x - (layout.bridge.x + layout.bridge.length / 2)) > .2) throw new Error('Blender bridge span is misaligned');
+    for (const side of [-1,1]) for (const dz of [-1,0,1]) {
+      const ray = new THREE.Raycaster(new THREE.Vector3(layout.bridge.x, .12, layout.bridge.z + dz), new THREE.Vector3(side,0,0), 0, layout.bridge.length/2 + .1);
+      if (ray.intersectObjects([app.scene.getObjectByName('Density city')],true).length) throw new Error('Bridge roadway or seawall blocks an approach');
+    }
     const coast = app.scene.getObjectByName('Blender coastal districts');
     if (!coast || coast.userData.beaches !== 3) throw new Error('Blender beach assets did not load');
     if (coast.userData.renderBatches > 30) throw new Error('Coastal props exceed batching budget');
@@ -79,22 +117,34 @@ const fs = require('node:fs');
     return { islands: layout.islands.length, beaches: coast.userData.beaches, coastalBatches: coast.userData.renderBatches, occupiedBlocks: occupiedBlocks.size, blockFormats: [...new Set(layout.blocks.map(b => b.format))], shoreEdges: layout.edges.filter(e => e.shore).length, eastIslandOffset: layout.ISLAND_OFFSET, lightweightSeaAnimated: true, seaTriangles: triangles, channelWidth: layout.CHANNEL_WIDTH, bridgePlaceholder: !!app.scene.getObjectByName('Inter-island bridge placeholder'), blocks: layout.blocks.length, plots: layout.slots.length, landmarks: app.landmarkRoots.length, accounts: app.accounts.length, rendered: app.renderedBuildings.size, offMap: app.accounts.filter(a => a.slot < 0).length, drawCalls: app.renderer.info.render.calls };
   })()`));
   await new Promise(r => setTimeout(r, 1500));
-  // Click the first tower through the actual canvas pointer handler.
-  const point = await evaluate(`(async () => {
-    const app = await import('./app.js'); const THREE = await import('three');
-    const root = [...app.renderedBuildings.values()][0];
-    const box = new THREE.Box3().setFromObject(root); const p = box.getCenter(new THREE.Vector3()); p.project(app.camera);
-    const rect = app.renderer.domElement.getBoundingClientRect();
-    return { x: rect.left + (p.x + 1) * rect.width / 2, y: rect.top + (1 - p.y) * rect.height / 2 };
-  })()`);
+  // Click a visible triangle; an asset's bounding-box center can be empty space.
+  await evaluate(`import('./app.js').then(app => { window.expectedTowerTitle = app.accounts[0].name; })`);
+  const point = await evaluate(`window.cityTestPick('tower')`);
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 });
-  console.log('Tower report opened:', await evaluate(`!document.querySelector('#city-stats').hidden`));
+  assert.equal(await evaluate(`!document.querySelector('#city-stats').hidden`), true, 'Canvas tower click must open its report');
+  assert.equal(await evaluate(`document.querySelector('#city-stats-title').textContent`), await evaluate('window.expectedTowerTitle'), 'Canvas click must open the selected tower report');
+  console.log('Tower report opened: true');
   await evaluate(`document.querySelector('#city-stats-close').click(); document.querySelector('#camera-button').click()`);
   await new Promise(r => setTimeout(r, 1200));
   fs.mkdirSync('artifacts', { recursive: true });
   const screenshot = await send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync('artifacts/city-density.png', Buffer.from(screenshot.result.data, 'base64'));
+  await evaluate(`(async () => {
+    const app = await import('./app.js'), layout = await import('./city-layout.js');
+    window.bridgePreviewPose = { target: app.controls.target.clone(), position: app.camera.position.clone(), zoom: app.camera.zoom };
+    const offset = app.camera.position.clone().sub(app.controls.target);
+    app.controls.target.set(layout.bridge.x,0,layout.bridge.z); app.camera.position.copy(app.controls.target).add(offset);
+    app.camera.zoom=6; app.camera.updateProjectionMatrix(); app.controls.update();
+  })()`);
+  await new Promise(r => setTimeout(r,400));
+  const bridgeShot = await send('Page.captureScreenshot',{format:'png'});
+  fs.writeFileSync('artifacts/bridge-detail.png',Buffer.from(bridgeShot.result.data,'base64'));
+  await evaluate(`(async () => {
+    const app=await import('./app.js'), pose=window.bridgePreviewPose;
+    app.controls.target.copy(pose.target); app.camera.position.copy(pose.position); app.camera.zoom=pose.zoom;
+    app.camera.updateProjectionMatrix(); app.controls.update(); delete window.bridgePreviewPose;
+  })()`);
   await evaluate(`(async () => {
     const app = await import('./app.js');
     window.coastPreviewPose = { target: app.controls.target.clone(), position: app.camera.position.clone(), zoom: app.camera.zoom };
@@ -115,17 +165,15 @@ const fs = require('node:fs');
   const seaDetail = await send('Page.captureScreenshot', { format: 'png' });
   fs.writeFileSync('artifacts/sea-detail.png', Buffer.from(seaDetail.result.data, 'base64'));
   await evaluate(`(async () => { const app = await import('./app.js'); app.camera.zoom = 1; app.camera.updateProjectionMatrix(); })()`);
-  const landmarkPoint = await evaluate(`(async () => {
-    const app = await import('./app.js'); const THREE = await import('three');
-    const box = new THREE.Box3().setFromObject(app.landmarkRoots[0]);
-    const p = box.getCenter(new THREE.Vector3()).project(app.camera); const r = app.renderer.domElement.getBoundingClientRect();
-    return { x: r.left + (p.x + 1) * r.width / 2, y: r.top + (1 - p.y) * r.height / 2 };
-  })()`);
+  const landmarkPoint = await evaluate(`window.cityTestPick('landmark')`);
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...landmarkPoint, button: 'left', clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...landmarkPoint, button: 'left', clickCount: 1 });
-  console.log('Landmark report:', await evaluate(`document.querySelector('#city-stats-title').textContent`));
+  assert.equal(await evaluate(`!document.querySelector('#city-stats').hidden`), true, 'Canvas landmark click must open its report');
+  assert.match(await evaluate(`document.querySelector('#city-stats-eyebrow').textContent`), /WAYNE/i, 'Canvas landmark click must open Wayne Tower');
+  console.log('Landmark report: Wayne Tower');
   await evaluate(`document.querySelector('#city-stats-close').click(); document.querySelector('[data-view="accounts"]').click(); document.querySelector('.feature-table-row').click()`);
-  console.log('Directory navigation:', await evaluate(`document.querySelector('#feature-drawer').hidden`));
+  assert.equal(await evaluate(`document.querySelector('#feature-drawer').hidden`), true, 'Directory selection must close drawer');
+  console.log('Directory navigation: true');
   await evaluate(`document.querySelector('#camera-button').click()`);
   await new Promise(r => setTimeout(r, 1000));
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
@@ -145,3 +193,4 @@ const fs = require('node:fs');
   })()`));
   ws.close();
 })().catch(error => { console.error(error); process.exit(1); });
+

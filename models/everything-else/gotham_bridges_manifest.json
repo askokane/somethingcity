@@ -1,0 +1,29 @@
+{
+  "Bridge_Gothic_Suspension": {
+    "file": "bridge_gothic_suspension.glb",
+    "length": 20,
+    "road_width": 3,
+    "overall_width": 5.2,
+    "pivot": "road center at elevation zero",
+    "axis": "glTF X length, Y up",
+    "triangles": 3812
+  },
+  "Bridge_Blackgate_Viaduct": {
+    "file": "bridge_blackgate_viaduct.glb",
+    "length": 20,
+    "road_width": 3,
+    "overall_width": 4.7,
+    "pivot": "road center at elevation zero",
+    "axis": "glTF X length, Y up",
+    "triangles": 3532
+  },
+  "Bridge_Narrows_Ironworks": {
+    "file": "bridge_narrows_ironworks.glb",
+    "length": 20,
+    "road_width": 3,
+    "overall_width": 4.5,
+    "pivot": "road center at elevation zero",
+    "axis": "glTF X length, Y up",
+    "triangles": 3092
+  }
+}

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createStylizedSea } from './stylized-sea.js';
 import { createCoastalScene } from './coastal-scene.js';
 import { isBeachEdge } from './coastal-plan.js';
@@ -22,7 +23,21 @@ export function createCity(scene) {
   }
   const sea = createStylizedSea(islands);
   group.add(sea.root);
-  const ready = createCoastalScene().then(coast => { group.add(coast); return coast; });
+  const coastReady = createCoastalScene().then(coast => { group.add(coast); return coast; });
+  const bridgeReady = new GLTFLoader().loadAsync('./models/everything-else/bridge_gothic_suspension.glb').then(gltf => {
+    const root = gltf.scene;
+    root.name = 'Inter-island gothic bridge';
+    root.position.set(bridge.x, 0.06, bridge.z);
+    root.scale.set(bridge.length / 20, 1, bridge.width / 3);
+    root.traverse(node => {
+      if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; }
+    });
+    group.add(root);
+    return root;
+  });
+  const ready = Promise.allSettled([coastReady, bridgeReady]).then(results => ({
+    failures: results.flatMap((result, i) => result.status === 'rejected' ? [{ asset: ['coastal scenery', 'bridge'][i], error: result.reason }] : []),
+  }));
   for (const c of landCells) {
     cube(c.x, -0.89, c.z, 12, 1.82, 12, '#46515a');
     cube(c.x, 0.03, c.z, 12, 0.08, 12, '#252d35');
@@ -43,19 +58,24 @@ export function createCity(scene) {
   }
   for (const edge of edges) {
     if (edge.shore && !isBeachEdge(edge)) {
-      cube(edge.x, -.15, edge.z, edge.vertical ? .25 : 12, .45, edge.vertical ? 12 : .25, '#778c91');
-      cube(edge.x, -.47, edge.z, edge.vertical ? .6 : 12, .025, edge.vertical ? 12 : .6, '#67969d');
+      // Open both seawalls across the full bridge approach, including its sidewalks.
+      const approach = edge.vertical && Math.abs(edge.x - bridge.x) <= bridge.length / 2 && Math.abs(edge.z - bridge.z) < 6 + bridge.width * .75;
+      const intervals = approach
+        ? [[edge.z - 6, Math.min(edge.z + 6, bridge.z - bridge.width * .75)], [Math.max(edge.z - 6, bridge.z + bridge.width * .75), edge.z + 6]]
+        : [[edge.z - 6, edge.z + 6]];
+      for (const [start, end] of intervals) {
+        if (end <= start) continue;
+        const z = edge.vertical ? (start + end) / 2 : edge.z;
+        const length = end - start;
+        cube(edge.x, -.15, z, edge.vertical ? .25 : 12, .45, edge.vertical ? length : .25, '#778c91');
+        cube(edge.x, -.47, z, edge.vertical ? .6 : 12, .025, edge.vertical ? length : .6, '#67969d');
+      }
     } else if (!edge.shore) {
       for (const offset of [-4.5, -1.5, 1.5, 4.5]) cube(edge.x + (edge.vertical ? 0 : offset), .085, edge.z + (edge.vertical ? offset : 0), edge.vertical ? .06 : 1.2, .015, edge.vertical ? 1.2 : .06, '#b1a383');
     }
   }
-  // Deliberately simple placeholder; replace this named group with the final bridge GLB.
-  const bridgeRoot = new THREE.Group(); bridgeRoot.name = 'Inter-island bridge placeholder'; group.add(bridgeRoot);
-  bridgeRoot.attach(cube(bridge.x, 0.04, bridge.z, bridge.length, 0.3, bridge.width, '#68727d'));
-  for (const side of [-1, 1]) bridgeRoot.attach(cube(bridge.x, 0.48, bridge.z + side * 1.6, bridge.length, 0.6, 0.18, '#c4b58d'));
-  for (let x = islands[0].maxX; x < islands[1].minX; x += 3) bridgeRoot.attach(cube(x + 1, 0.2, bridge.z, 1.2, 0.02, 0.06, '#d4c9aa'));
   const matrix = new THREE.Matrix4();
-  // Batch static streets, slabs and bridge pieces by material as the map grows.
+  // Batch static streets and slabs by material as the map grows.
   for (const material of materials.values()) {
     const pieces = group.children.filter(child => child.isMesh && !child.isInstancedMesh && child.material === material);
     if (!pieces.length) continue;
