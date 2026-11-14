@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR } from './city-layout.js';
 import { checkAccount, checkSignedIn } from './checker/checker.js';
 
 const CHECKER_API = 'http://localhost:8787';
@@ -17,11 +18,7 @@ const accounts = [
   { id: 'bc-006', name: 'Narrows Cloud', label: 'l***@narrows.test', district: 'The Narrows', status: 'unknown', slot: 5, checkedAt: '10:42 AM', source: 'Demo fixture', breaches: [], error: 'The sample check is unavailable.' },
 ];
 
-const slots = [
-  { x: -12, z: -12, district: 'Northpoint' }, { x: 0, z: -12, district: 'Old Gotham' }, { x: 12, z: -12, district: 'Crown Point' },
-  { x: -12, z: 0, district: 'The Foundry' }, { x: 0, z: 0, district: 'Civic Center' }, { x: 12, z: 0, district: 'The Narrows' },
-  { x: -12, z: 12, district: 'Harbor Ward' }, { x: 0, z: 12, district: 'Market Square' }, { x: 12, z: 12, district: 'East Channel' },
-];
+const initialAccounts = structuredClone(accounts);
 const statusText = { clear: 'No known match in this source', breached: 'Known breach match', unknown: 'Check unavailable' };
 const statusColors = { clear: 0x83bc9b, breached: 0xe58268, unknown: 0xd2b56b };
 const sceneHost = document.querySelector('#city-scene');
@@ -32,11 +29,13 @@ accounts.forEach((account) => slotOccupants.set(account.slot, account.id));
 let selectedId = accounts[0].id;
 let nextId = 7;
 let toastTimer;
-const landmarkSlots = new Set([7]);
+const landmarkSlots = new Set();
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#182129');
-scene.fog = new THREE.Fog('#182129', 43, 82);
+scene.fog = new THREE.Fog('#182129', 85, 160);
+const city = createCity(scene);
+const landmarkRoots = [];
 const camera = new THREE.OrthographicCamera(-23, 23, 15, -15, 0.1, 180);
 const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: false, powerPreference: 'high-performance' });
 // Render at device resolution so the full-screen city stays sharp at every viewport size.
@@ -163,19 +162,7 @@ function finishInitialLoad() {
   document.querySelector('#loading-overlay small').textContent = 'Buildings and street models ready';
 }
 
-environmentLoader.load('./models/everything-else/gotham_ward_environment.glb', async (gltf) => {
-  gltf.scene.name = 'Gotham Ward Blender environment';
-  gltf.scene.traverse((node) => { if (node.isMesh) { node.receiveShadow = true; node.castShadow = true; } });
-  scene.add(gltf.scene);
-  await addCityProps(gltf.scene);
-  environmentReady = true;
-  finishInitialLoad();
-}, undefined, async (error) => {
-  console.error('Could not load Blender environment:', error);
-  environmentReady = true;
-  showToast('Blender city environment could not be loaded.');
-  finishInitialLoad();
-});
+environmentReady = true;
 
 loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
   const variants = await Promise.all([
@@ -194,7 +181,24 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
     const model = chooseBuildingModel(account, models);
     addAccountBuilding(account, model, buildingScale(model, models));
   });
-  if (models.arkham) addPlacedModel(models.arkham, [0, 0.23, 12], 0.54, 0);
+    for (const landmark of landmarks) {
+    const block = blocks[landmark.block];
+    let source;
+    try { source = await loadModel(`./models/buildings/${landmark.file}`); }
+    catch {
+      source = new THREE.Group();
+      const placeholder = new THREE.Mesh(new THREE.BoxGeometry(5, landmark.height, 4), new THREE.MeshStandardMaterial({ color: '#777c87' }));
+      placeholder.position.y = landmark.height / 2; source.add(placeholder);
+    }
+    const bounds = new THREE.Box3().setFromObject(source);
+    const size = bounds.getSize(new THREE.Vector3());
+    const scale = Math.min(7 / size.x, 6 / size.z, landmark.height / size.y);
+    const root = addPlacedModel(source, [block.x, 0.23, block.z], scale);
+    root.userData.landmark = landmark.name;
+    const label = landmarkLabel(landmark.name); label.position.set(block.x, 0.23 + size.y * scale + 0.8, block.z); scene.add(label);
+    landmarkRoots.push(root);
+  }
+  city.sync(slotOccupants);
   accountModelsReady = true;
   finishInitialLoad();
 }, undefined, (error) => {
@@ -224,7 +228,11 @@ function addAccountBuilding(account, source, scale = 2) {
   root.name = `account-${account.id}`;
   // Blender assets face the ward's common street frontage; keep that axis aligned to the grid.
   root.rotation.y = 0;
-  root.scale.setScalar(scale);
+    const sourceSize = new THREE.Box3().setFromObject(source).getSize(new THREE.Vector3());
+  const footprintScale = Math.min(3.2 / sourceSize.x, 3.2 / sourceSize.z);
+  const age = account.firstSeen ? Math.max(0, (Date.now() - Date.parse(account.firstSeen)) / 31557600000) : 3;
+  const targetHeight = FLOOR * (2 + Math.min(5, Math.floor(age / 3)));
+  root.scale.set(footprintScale, targetHeight / sourceSize.y, footprintScale);
   cloneInstanceMaterials(root);
   const slot = slots[account.slot];
   root.updateMatrixWorld(true);
@@ -238,6 +246,7 @@ function addAccountBuilding(account, source, scale = 2) {
   addStatusBeacon(root, account.status, height);
   renderedBuildings.set(account.id, root);
   slotOccupants.set(account.slot, account.id);
+  city.sync(slotOccupants);
   applyBuildingState(account);
 }
 
@@ -251,7 +260,11 @@ function cloneInstanceMaterials(root) {
 function addStatusBeacon(root, status, buildingHeight = 6.5) {
   const marker = new THREE.Group();
   marker.name = 'status-beacon';
-  marker.position.set(0, buildingHeight + 0.5, 0);
+  root.updateMatrixWorld(true);
+  const roofBounds = new THREE.Box3().setFromObject(root);
+  const roofCenter = roofBounds.getCenter(new THREE.Vector3());
+  marker.position.copy(root.worldToLocal(new THREE.Vector3(roofCenter.x, roofBounds.max.y + 0.5, roofCenter.z)));
+  marker.scale.set(1 / root.scale.x, 1 / root.scale.y, 1 / root.scale.z);
   const color = statusColors[status];
   const ring = new THREE.Mesh(new THREE.TorusGeometry(0.36, 0.045, 6, 20), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 1.0, roughness: 0.35 }));
   ring.rotation.x = Math.PI / 2;
@@ -549,7 +562,7 @@ function installCheck(result) {
     const model = chooseBuildingModel(account, loadedBuildingModels);
     addAccountBuilding(account, model, buildingScale(model, loadedBuildingModels));
   });
-  renderOverview(); renderDetails();
+  city.sync(slotOccupants); renderOverview(); renderDetails();
   document.querySelector('#service-status').textContent = result.source.startsWith('Demo') ? 'OFFLINE DEMO' : result.status === 'unknown' ? 'CHECK UNAVAILABLE' : 'ACCOUNT VERIFIED';
   showToast(result.status === 'unknown' ? (result.error || 'Check unavailable') : `Check complete Ã‚Â· ${accounts.length} accounts`);
 }
@@ -684,7 +697,7 @@ document.querySelector('#google-button').addEventListener('click', toggleGoogleS
 handleGoogleReturn();
 restoreGoogleSession();
 document.querySelector('#camera-button').addEventListener('click', () => {
-  focusCamera(0, 0, 0, 850, new THREE.Vector3(25, 24, 25), 1);
+  focusCamera(0, 0, 0, 850, new THREE.Vector3(48, 48, 50), 1);
 });
 
 const raycaster = new THREE.Raycaster();
@@ -697,7 +710,19 @@ renderer.domElement.addEventListener('pointerup', (event) => {
   const bounds = renderer.domElement.getBoundingClientRect();
   pointer.set(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObjects([...renderedBuildings.values()], true);
+  const hits = raycaster.intersectObjects([...renderedBuildings.values(), ...landmarkRoots], true);
+  if (hits.length) {
+    let node = hits[0].object;
+    while (node && !node.userData.landmark && !node.userData.accountId) node = node.parent;
+    if (node?.userData.landmark) {
+      const position = node.getWorldPosition(new THREE.Vector3());
+      showCityStats();
+      focusCamera(position.x, 1, position.z);
+      document.querySelector('#city-stats-title').textContent = node.userData.landmark;
+      document.querySelector('#city-stats-subtitle').textContent = 'City-wide account overview';
+      return;
+    }
+  }
   const id = hits.map((hit) => {
     let node = hit.object;
     while (node && !node.userData.accountId) node = node.parent;
@@ -714,12 +739,12 @@ function resizeScene() {
   const height = sceneHost.clientHeight;
   if (!width || !height) return;
   const aspect = width / height;
-  const viewHeight = 34;
+  const viewHeight = Math.max(62, 72 / aspect);
   camera.left = -viewHeight * aspect / 2;
   camera.right = viewHeight * aspect / 2;
   camera.top = viewHeight / 2;
   camera.bottom = -viewHeight / 2;
-  camera.position.set(24, 24, 25);
+  camera.position.copy(controls.target).add(new THREE.Vector3(48, 48, 50));
   camera.updateProjectionMatrix();
   renderer.setSize(width, height, false);
 }
@@ -734,3 +759,6 @@ function animate() {
 renderOverview();
 renderDetails();
 animate();
+
+// Scene inspection for the local preview and regression checks.
+export { scene, camera, renderer, accounts, renderedBuildings, landmarkRoots, installCheck, resetDemo };
