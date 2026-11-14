@@ -5,7 +5,16 @@ import { beaches, beachPoint } from './coastal-plan.js';
 import { blocks } from './city-plan.js';
 
 export async function createCoastalScene() {
-  const gltf = await new GLTFLoader().loadAsync('./models/everything-else/gotham_coastal_kit.glb');
+  const loader = new GLTFLoader();
+  const [gltf, waterfrontGltf, boats] = await Promise.all([
+    loader.loadAsync('./models/everything-else/gotham_coastal_kit.glb'),
+    loader.loadAsync('./models/waterfront/gotham_waterfront_kit.glb'),
+    Promise.all([
+      ['sailboat', './models/ships/sailboat_west_bay.glb'],
+      ['rowboat', './models/ships/rowboat_beach_cove.glb'],
+      ['fishing', './models/ships/fishing_skiff_blackgate.glb'],
+    ].map(async ([name, path]) => [name, await loader.loadAsync(path)])),
+  ]);
   const group = new THREE.Group(); group.name = 'Blender coastal districts';
   function prototype(name) {
     let found;
@@ -19,13 +28,37 @@ export async function createCoastalScene() {
     root.traverse(node => { if (node.isMesh) { node.castShadow = name !== 'Beach_Sand_Patch'; node.receiveShadow = true; } });
     group.add(root); return root;
   }
+  const waterfrontGroup = new THREE.Group(); waterfrontGroup.name = 'Gotham waterfront infrastructure'; group.add(waterfrontGroup);
+  const fleetGroup = new THREE.Group(); fleetGroup.name = 'Moored beach and marina craft'; group.add(fleetGroup);
+  function waterfrontPrototype(name) {
+    const found = waterfrontGltf.scene.getObjectByName(name);
+    if (!found) throw new Error(`Waterfront asset missing: ${name}`);
+    return found;
+  }
+  function placeWaterfront(name,x,y,z,rotation=0,scale=1) {
+    const model=waterfrontPrototype(name).clone(true);
+    model.name=name; model.position.set(x,y,z); model.rotation.y=rotation; model.scale.setScalar(scale);
+    model.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;}});
+    waterfrontGroup.add(model); return model;
+  }
+  function placeBoat(name,x,y,z,rotation=0,scale=1) {
+    const gltf=Object.fromEntries(boats)[name];
+    const model=gltf.scene.clone(true); model.name=`Marina_${name}`;
+    model.position.set(x,y,z); model.rotation.y=rotation; model.scale.setScalar(scale);
+    model.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;}});
+    fleetGroup.add(model); return model;
+  }
   for (const beach of beaches) {
     const patch = place('Beach_Sand_Patch', beach.x, 0, beach.z, beach.rotation);
     patch.name = beach.name;
     const local = (name, x, y, z, angle = 0, scale = 1) => {
       const p = beachPoint(beach, x, z); return place(name, p.x, y, p.z, beach.rotation + angle, scale);
     };
+    const waterfrontLocal=(name,x,y,z,angle=0,scale=1)=>{
+      const p=beachPoint(beach,x,z); return placeWaterfront(name,p.x,y,p.z,beach.rotation+angle,scale);
+    };
     local('Beach_Steps', 0, 0, 0);
+    waterfrontLocal('Beach_Boardwalk_Segment',0,.12,.12);
     for (const x of [-10.5,-8.7,8.8,10.4]) {
       local('Coast_Rock', x, -.05, 1.3 + Math.abs(x) % 2, x, beach.style === 'rocky' ? 1.7 : .9);
       local('Dune_Grass', x + .5, .1, .7, x);
@@ -42,6 +75,69 @@ export async function createCoastalScene() {
       local('Coast_Rock', 6, -.18, 5.5, .7, 1.9);
     }
   }
+
+  // Atharva's waterfront kit, anchored to the Gotham map's blocks rather than fixed coordinates.
+  // The lighthouse has its own block at Uptown's north-east tip (North Point); its beacon sweep stays a live pivot.
+  const lightBlock = blocks.find((b) => b.format === 'lighthouse');
+  const lighthouse = lightBlock ? placeWaterfront('Lighthouse_North_Head', lightBlock.x + 1.5, .23, lightBlock.z - 1.5) : null;
+  const sweep = lighthouse?.getObjectByName('Lighthouse_Beam_Sweep');
+
+  // Stevensburgh Strand (Downtown's south beach) gets the beach activity and the kiosk.
+  const south = beaches.find((b) => b.name === 'Stevensburgh Strand');
+  if (south) {
+    const local = (name, x, y, z, angle = 0) => { const p = beachPoint(south, x, z); return placeWaterfront(name, p.x, y, p.z, south.rotation + angle); };
+    local('Beach_Volleyball_Net', -4, .12, 2.2);
+    local('Boardwalk_IceCream_Stand', 2.7, .14, 1.5);
+  }
+
+  // The fishing pier and its figures reach out from Reatton Beach.
+  const west = beaches.find((b) => b.name === 'Reatton Beach');
+  if (west) { const p = beachPoint(west, 7.5, 0); placeWaterfront('Fishing_Pier_People', p.x, .08, p.z, west.rotation); }
+
+  // Haysville Docks: marina, crane, warehouse, containers, bollards and a breakwater on the dock block's sea face (east).
+  const dock = blocks.find((b) => b.format === 'dockyard');
+  if (dock) {
+    const face = dock.x + 6; // the block's east shoreline
+    placeWaterfront('Marina_Floating_Slips', face, -.12, dock.z - 2, Math.PI / 2);
+    placeBoat('sailboat', face + 5.6, -.05, dock.z - 6, 0, .78);
+    placeBoat('fishing', face + 9, -.08, dock.z + 2, 0, .82);
+    placeBoat('rowboat', face + 12.1, -.02, dock.z - 5.8, 0, .78);
+    placeWaterfront('Gantry_Crane_Haysville', face - 1.5, .23, dock.z + 3, 0, .92);
+    placeWaterfront('Warehouse_Haysville_Docks', dock.x - 2, .23, dock.z, Math.PI / 2, .7);
+    placeWaterfront('Container_Rust', dock.x + 2, .23, dock.z - 3);
+    placeWaterfront('Container_Teal', dock.x + 2, 2.81, dock.z - 3);
+    placeWaterfront('Container_Slate', dock.x + 2, .23, dock.z + 3.5);
+    for (const dz of [-6, -2, 2, 6]) placeWaterfront('Harbor_Bollard', face - .4, .23, dock.z + dz, 0, 1.15);
+    placeWaterfront('Breakwater_Harbor_Light', face, -.28, dock.z + 15, Math.PI / 2, 1.0);
+    placeWaterfront('Riprap_Rock_Pile', face + .4, -.25, dock.z - 13, 0, 1.15);
+  }
+  // Ace Chemicals' shore: a line of bollards (the landmark fills its block, so no containers).
+  const ace = blocks.find((b) => b.format === 'landmark' && b.district === 'Haysville');
+  if (ace) for (const dz of [-4, 0, 4]) placeWaterfront('Harbor_Bollard', ace.x + 5.6, .23, ace.z + dz, 0, 1.05);
+
+  // Consolidate the static waterfront set by material while retaining the
+  // lighthouse beam and all named scene roots for animation and inspection.
+  waterfrontGroup.updateMatrixWorld(true);
+  const staticBatches=new Map(), staticMeshes=[];
+  waterfrontGroup.traverse(node=>{
+    if(!node.isMesh||node.name==='Lighthouse_rotating_light_beam') return;
+    const key=node.material.uuid;
+    if(!staticBatches.has(key)) staticBatches.set(key,{material:node.material,geometries:[]});
+    const geometry=node.geometry.index?node.geometry.toNonIndexed():node.geometry.clone();
+    for(const attr of Object.keys(geometry.attributes)) if(!['position','normal'].includes(attr)) geometry.deleteAttribute(attr);
+    geometry.applyMatrix4(node.matrixWorld); staticBatches.get(key).geometries.push(geometry); staticMeshes.push(node);
+  });
+  for(const batch of staticBatches.values()){
+    const geometry=mergeGeometries(batch.geometries,false);
+    if(!geometry) throw new Error('Waterfront geometry batching failed');
+    const mesh=new THREE.Mesh(geometry,batch.material); mesh.name='Waterfront render batch'; mesh.castShadow=true; mesh.receiveShadow=true;
+    waterfrontGroup.add(mesh); batch.geometries.forEach(g=>g.dispose());
+  }
+  staticMeshes.forEach(mesh=>mesh.parent.remove(mesh));
+  waterfrontGroup.userData.renderBatches=staticBatches.size;
+  waterfrontGroup.userData.update=time=>{if(sweep) sweep.rotation.y=time*.36;};
+  waterfrontGroup.userData.namedAssets=['Lighthouse_North_Head','Fishing_Pier_People','Marina_Floating_Slips','Breakwater_Harbor_Light','Gantry_Crane_Haysville'];
+  group.userData.update=time=>waterfrontGroup.userData.update(time);
   for (const b of blocks) {
     if (b.format === 'market') for (const dx of [-8,-4,0,4,8]) for (const dz of [-3.1,3.1]) place('Market_Stall', b.x + dx, .23, b.z + dz, dz < 0 ? Math.PI : 0);
     if (b.format === 'garden') for (const dx of [-6,6]) place('Coast_Bench', b.x + dx, .23, b.z + 1.1, Math.PI);
@@ -61,6 +157,10 @@ export async function createCoastalScene() {
   const batches = new Map(), sourceMeshes = [];
   group.traverse(node => {
     if (!node.isMesh) return;
+    if (node.name.startsWith('Lighthouse_rotating_light_beam')) return;
+    let root = node.parent;
+    while (root && root.parent !== group && root !== group) root = root.parent;
+    if (root === waterfrontGroup || root === fleetGroup) return;
     const key = node.material.uuid + ':' + node.castShadow;
     if (!batches.has(key)) batches.set(key, { material: node.material, shadow: node.castShadow, geometry: [] });
     const geometry = node.geometry.index ? node.geometry.toNonIndexed() : node.geometry.clone();

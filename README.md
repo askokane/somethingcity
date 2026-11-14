@@ -50,6 +50,8 @@ The environment in `models/everything-else/gotham_ward_environment.blend` is aut
 
 The runtime loads Blender GLB models for the environment, crosswalks, stoplights, lamps, trees, bushes, hydrants, and account buildings. It does not generate a procedural city or substitute procedural buildings if an asset fails to load. Some prop exports need an axis correction when placed into the app's Y-up world.
 
+The coastal scene reuses `models/everything-else/gotham_coastal_kit.glb` for the lifeguard huts, umbrellas, and short jetty, and adds the North Head lighthouse, boardwalks, fishing pier, marina, breakwater, shoreline modules, and Haysville/Ace waterfront props from `models/waterfront/gotham_waterfront_kit.glb`. The lighthouse beam sweeps during the city animation; a few existing small craft fill the marina slips.
+
 Account building style is selected deterministically from the account ID, so the same login keeps its style between loads. The available styles use the generic Gotham tower, Wayne Tower, and Ace Chemicals assets. Arkham Asylum occupies a reserved landmark block. Account buildings and the Arkham landmark use the updated in-map scales.
 
 ## Project areas

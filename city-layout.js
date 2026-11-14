@@ -23,7 +23,8 @@ export function createCity(scene) {
   }
   const sea = createStylizedSea(islands);
   group.add(sea.root);
-  const coastReady = createCoastalScene().then(coast => { group.add(coast); return coast; });
+  let coastalRoot = null;
+  const coastReady = createCoastalScene().then(coast => { coastalRoot = coast; group.add(coast); return coast; });
   // Atharva's bridge models (20 units long along X, 3-unit road, pivot at the road centre): one per bridge in
   // city-plan.js, stretched to its span and turned for north-south crossings.
   const bridgeFiles = { gothic: 'bridge_gothic_suspension.glb', narrows: 'bridge_narrows_ironworks.glb', blackgate: 'bridge_blackgate_viaduct.glb' };
@@ -149,7 +150,7 @@ export function createCity(scene) {
     }
   }
   sync(new Map());
-  return { sync, group, ready, update(time) { sea.update(time); } };
+  return { sync, group, ready, update(time) { sea.update(time); coastalRoot?.userData.update?.(time); } };
 }
 
 export function landmarkLabel(name) {

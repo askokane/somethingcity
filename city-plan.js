@@ -113,7 +113,7 @@ merge(['3,10', '3,11'], 'garden', 'Robinson Park'); // Uptown
 merge(['7,6', '7,7'], 'garden', 'Gotham Commons'); // Reatton, on the river
 merge(['12,6', '12,7'], 'market', 'Chinatown Market'); // Downtown west
 merge(['14,11', '14,12'], 'garden', 'Stevensburgh Green'); // Downtown, by the south shore
-for (const [id, format, district] of [['13,9', 'plaza', 'Founders Square'], ['12,16', 'dockyard', 'Haysville Docks']]) {
+for (const [id, format, district] of [['13,9', 'plaza', 'Founders Square'], ['12,16', 'dockyard', 'Haysville Docks'], ['1,15', 'lighthouse', 'North Point Light']]) {
   const b = blocks.find((block) => block.sourceId === id);
   b.format = format; b.district = district; b.width = b.depth = 9;
 }
@@ -139,7 +139,7 @@ for (const span of bridgeSpans) {
 }
 
 export const slots = blocks.flatMap((b, block) => {
-  const offsets = ['landmark','garden','plaza','dockyard','suburb','avenue'].includes(b.format) ? []
+  const offsets = ['landmark','garden','plaza','dockyard','suburb','avenue','lighthouse'].includes(b.format) ? []
     : b.format === 'market' ? [[-7.5, 0], [-2.5, 0], [2.5, 0], [7.5, 0]]
     : b.format === 'terrace' ? [[0, -2.25], [0, 2.25]]
     : b.format === 'courtyard' ? [[-2.25, 0], [2.25, 0]]
