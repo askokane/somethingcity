@@ -9,7 +9,9 @@
  *   breaches: string[],       // names of breaches that hit this service
  *   foundIn: Array<"inbox" | "breach">,
  *   firstSeen: string | null, // earliest inbox email date (YYYY-MM-DD), if found in the inbox
+ *   serviceBreaches: ServiceBreach[], // every known breach OF THIS SERVICE, even if your email wasn't in it (newest first)
  * }} Account
+ * @typedef {{ name: string, date: string, exposedData: string[], records: number | null }} ServiceBreach
  * @typedef {{
  *   id: string,
  *   label: string,
@@ -57,8 +59,17 @@ export function serviceKey(domain) {
   return stripped.length >= 3 ? stripped : label;
 }
 
-/** Merge inbox-found services with breached services into one list, breached first. */
-export function toAccounts(breaches, inbox = []) {
+/** Domains to look up service breaches for: each account's own domain, plus "<key>.com" (lyftmail.com -> lyft.com). */
+export function lookupDomains(domains) {
+  return [...new Set(domains.flatMap((d) => [d, `${serviceKey(d)}.com`]))];
+}
+
+/**
+ * Merge inbox-found services with breached services into one list:
+ * your email breached first, then services that were breached (without your email), then the rest.
+ * serviceMap: Map(base domain -> ServiceBreach[]) from db.js serviceBreaches().
+ */
+export function toAccounts(breaches, inbox = [], serviceMap = new Map()) {
   const byDomain = new Map(inbox.map((a) => [serviceKey(a.domain), { ...a, breached: false, breaches: [], foundIn: ["inbox"] }]));
   for (const b of breaches) {
     if (!b.domain) continue; // e.g. stealer-log dumps aren't a service account
@@ -68,7 +79,10 @@ export function toAccounts(breaches, inbox = []) {
     a.breached = true;
     a.breaches.push(b.name);
   }
-  return [...byDomain.values()].sort((x, y) => y.breached - x.breached || x.name.localeCompare(y.name));
+  const accounts = [...byDomain.values()];
+  for (const a of accounts) a.serviceBreaches = serviceMap.get(a.domain) ?? serviceMap.get(`${serviceKey(a.domain)}.com`) ?? [];
+  const rank = (a) => (a.breached ? 2 : a.serviceBreaches.length ? 1 : 0);
+  return accounts.sort((x, y) => rank(y) - rank(x) || x.name.localeCompare(y.name));
 }
 
 // Fictional services. Categories only: never leaked values.
@@ -94,6 +108,13 @@ const FIXTURES = {
   // "unknown@demo.test" (and any other address) has no entry, so the check is unavailable.
 };
 
+// Fictional service-level breaches: Streamly was breached, but these demo emails weren't in it.
+const FIXTURE_SERVICE_BREACHES = new Map([
+  ["streamly.example", [{ name: "Streamly", date: "2022-09-30", exposedData: ["Email addresses", "Names", "Passwords"], records: 4200000 }]],
+  ["pixelmart.example", [{ name: "PixelMart", date: "2021-06-14", exposedData: ["Email addresses", "Passwords", "Usernames"], records: 1300000 }]],
+  ["trailnote.example", [{ name: "TrailNote", date: "2023-02-03", exposedData: ["Email addresses", "IP addresses"], records: 870000 }]],
+]);
+
 export const DEMO_ACCOUNTS = ["breached@demo.test", "clear@demo.test", "unknown@demo.test"];
 
 /**
@@ -115,7 +136,7 @@ export async function checkAccount(input, { endpoint } = {}) {
   if (!f) {
     return { ...base, checkedAt: null, status: "unknown", breaches: [], accounts: [], error: "Check unavailable: this source has no data for this account." };
   }
-  return { ...base, checkedAt: new Date().toISOString(), status: f.breaches.length ? "breached" : "clear", breaches: f.breaches, accounts: toAccounts(f.breaches, f.inbox) };
+  return { ...base, checkedAt: new Date().toISOString(), status: f.breaches.length ? "breached" : "clear", breaches: f.breaches, accounts: toAccounts(f.breaches, f.inbox, FIXTURE_SERVICE_BREACHES) };
 }
 
 /** Live check for whoever is signed in (Google or email code). Use after the Google redirect, when the page has no email. */

@@ -16,7 +16,8 @@ assert.equal(baseDomain("news.bbc.co.uk"), "bbc.co.uk");
 const b = await checkAccount("Breached@demo.test");
 assert.equal(b.status, "breached");
 assert.equal(b.breaches.length, 2);
-assert.deepEqual(b.accounts.map((a) => [a.name, a.breached]), [["PixelMart", true], ["TrailNote", true], ["BookNook", false], ["Streamly", false]]);
+// Order: your data breached, then breached services (Streamly), then the rest
+assert.deepEqual(b.accounts.map((a) => [a.name, a.breached, a.serviceBreaches.length]), [["PixelMart", true, 1], ["TrailNote", true, 1], ["Streamly", false, 1], ["BookNook", false, 0]]);
 assert.deepEqual(b.accounts[0].foundIn, ["inbox", "breach"]);
 const c = await checkAccount("clear@demo.test");
 assert.equal(c.status, "clear");
@@ -91,6 +92,14 @@ assert.equal(real.find((a) => a.domain === "facebook.com").firstSeen, "2026-06-2
 const { toAccounts } = await import("./checker.js");
 assert.equal(toAccounts([{ name: "Facebook", domain: "facebook.com" }], [{ name: "Facebook", domain: "facebookmail.com", firstSeen: null }]).length, 1);
 
+// Service breaches: matched by the account's domain or "<key>.com", never marking YOUR data as breached
+const { lookupDomains } = await import("./checker.js");
+assert.deepEqual(lookupDomains(["lyftmail.com", "adobe.com"]), ["lyftmail.com", "lyft.com", "adobe.com"]);
+const svc = new Map([["lyft.com", [{ name: "Lyft", date: "2020-01-01", exposedData: [], records: null }]]]);
+const [lyft] = toAccounts([], [{ name: "Lyft", domain: "lyftmail.com", firstSeen: null }], svc);
+assert.equal(lyft.breached, false);
+assert.equal(lyft.serviceBreaches[0].name, "Lyft");
+
 // Server: verification gate, codes, sessions
 await new Promise((r) => server.listen(0, "localhost", r));
 const base = `http://localhost:${server.address().port}`;
@@ -134,6 +143,7 @@ if (process.env.LIVE || process.argv.includes("--live")) {
   assert.equal(r.label, "t***@example.com");
   assert.ok(r.breaches.length > 10 && r.breaches.some((x) => x.domain === "adobe.com" && x.date));
   assert.ok(r.accounts.length > 5 && r.accounts.every((a) => a.breached && a.foundIn[0] === "breach"));
+  assert.ok(r.accounts.find((a) => a.domain === "adobe.com").serviceBreaches.some((x) => x.name === "Adobe" && x.date.startsWith("2013")));
   console.log(`live: ${r.breaches.length} breaches -> ${r.accounts.length} accounts, e.g. ${r.accounts.slice(0, 3).map((a) => a.name).join(", ")}`);
 
   const { checkXon } = await import("./sources.js");

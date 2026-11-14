@@ -2,9 +2,9 @@
 // Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PORT
 import http from "node:http";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { accountId, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
+import { accountId, lookupDomains, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
 import { checkXon, scanInbox } from "./sources.js";
-import { timeline } from "./db.js";
+import { serviceBreaches, timeline } from "./db.js";
 
 const PORT = Number(process.env.PORT) || 8787;
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -149,8 +149,8 @@ const post = (p) => fetch(p, { method: "POST", headers: { "content-type": "appli
 document.getElementById("logout").onclick = async (e) => { e.preventDefault(); await post("/api/logout"); location.href = "/dev"; };
 const r = await post("/api/check").then((x) => x.json());
 document.getElementById("out").textContent = r.status
-  ? \`\${r.label}: \${r.status} (\${r.source})\${r.error ? " - " + r.error : ""}\\n\${r.accounts.length} linked accounts, \${r.accounts.filter((a) => a.breached).length} breached\\n\\n\` +
-    r.accounts.map((a) => \`\${a.breached ? "BREACHED" : "ok      "}  \${a.name.slice(0, 28).padEnd(28)} \${a.domain.padEnd(26)} \${a.foundIn.join("+").padEnd(13)} \${a.firstSeen ?? ""}\`).join("\\n")
+  ? \`\${r.label}: \${r.status} (\${r.source})\${r.error ? " - " + r.error : ""}\\n\${r.accounts.length} linked accounts, \${r.accounts.filter((a) => a.breached).length} with your data breached, \${r.accounts.filter((a) => !a.breached && a.serviceBreaches?.length).length} more on breached services\\n\\n\` +
+    r.accounts.map((a) => \`\${a.breached ? "BREACHED" : a.serviceBreaches?.length ? "SERVICE " : "ok      "}  \${a.name.slice(0, 28).padEnd(28)} \${a.domain.padEnd(26)} \${a.foundIn.join("+").padEnd(13)} \${(a.firstSeen ?? "").padEnd(11)} \${(a.serviceBreaches ?? []).map((b) => b.name + " " + b.date.slice(0, 4)).join(", ")}\`).join("\\n")
   : (r.error ?? "Not signed in.");
 </script>`;
 
@@ -161,7 +161,10 @@ async function check(req, body) {
   const email = body.email === undefined ? session?.email : normalizeEmail(body.email);
   if (!session || email !== session.email) return [401, { error: "Verify this email first." }];
   const result = await checkXon(email);
-  return [200, { id: await accountId(email), label: maskEmail(email), ...result, accounts: toAccounts(result.breaches, session.inbox ?? []) }];
+  const inbox = session.inbox ?? [];
+  const domains = lookupDomains([...inbox.map((a) => a.domain), ...result.breaches.map((b) => b.domain).filter(Boolean)]);
+  const serviceMap = await serviceBreaches(domains).catch(() => new Map()); // Tiger Data join; never blocks the check
+  return [200, { id: await accountId(email), label: maskEmail(email), ...result, accounts: toAccounts(result.breaches, inbox, serviceMap) }];
 }
 
 export const server = http.createServer(async (req, res) => {
