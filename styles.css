@@ -39,8 +39,3 @@ body{background:#101a25}
 .demo-shortcuts{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0 16px}.demo-shortcuts button{padding:7px 8px;border:2px solid #416174;background:#20394a;color:#ffe480;font:700 9px "Courier New",monospace;cursor:pointer}.demo-shortcuts button:hover{background:#294b60;outline:1px solid #ffd45e}.service-status{color:#7ce3bd;font:800 9px "Courier New",monospace;white-space:nowrap}.city-stats-backdrop{z-index:25}
 @media(max-width:900px){.service-status{display:none}}
 .nav-link.nav-check{background:#ffd45e;color:#182431;outline:2px solid #080f16}.nav-link.nav-check:hover{background:#ffe480;color:#182431}
-
-/* The hidden attribute must win over display rules (e.g. the code label showed while hidden). */
-[hidden]{display:none!important}
-/* "Send verification code" reuses the icon-sized header button; let it size to its text. */
-.verify-actions .header-button{width:auto;height:auto;min-height:40px;padding:9px 14px;font-size:12px;line-height:1.2;white-space:nowrap}
