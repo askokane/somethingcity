@@ -7,8 +7,12 @@ import { checkXon, getCatalog, scanInbox } from "./sources.js";
 import { news, personalTimeline, serviceBreaches, timeline } from "./db.js";
 
 const PORT = Number(process.env.PORT) || 8787;
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
-const REDIRECT_URI = `http://localhost:${PORT}/auth/google/callback`;
+// Deployed (see DEPLOY.md): PUBLIC_URL=https://your-domain, with Caddy serving the frontend and proxying here on the same origin.
+const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+const FRONTEND_URL = process.env.FRONTEND_URL || PUBLIC_URL || "http://localhost:5173";
+const REDIRECT_URI = `${PUBLIC_URL || `http://localhost:${PORT}`}/auth/google/callback`;
+const SECURE = PUBLIC_URL.startsWith("https://"); // cookies only over HTTPS once deployed
+const DEV_PAGE_ON = !PUBLIC_URL || process.env.DEV_PAGE === "1"; // /dev is a local test page, off on a public server
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const MIN = 60e3;
 
@@ -19,7 +23,27 @@ const oauthStates = new Map(); // state -> expires
 
 const sha = (s) => createHash("sha256").update(s).digest();
 const json = (res, status, body, headers = {}) => res.writeHead(status, { "content-type": "application/json", ...headers }).end(JSON.stringify(body));
-const cookie = (name, value, maxAge) => `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+const cookie = (name, value, maxAge) => `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${SECURE ? "; Secure" : ""}`;
+
+// Per-IP rate limits for the endpoints a stranger could abuse on a public server (code emails, Gemini quota).
+// Behind Caddy every request comes from loopback, so trust X-Forwarded-For only then.
+// ponytail: in-memory fixed windows, single process; fine for a demo server.
+const hits = new Map(); // "bucket:ip" -> { count, resetAt }
+function clientIp(req) {
+  const remote = req.socket.remoteAddress ?? "";
+  const loopback = remote === "::1" || remote.startsWith("127.") || remote === "::ffff:127.0.0.1";
+  return (loopback && req.headers["x-forwarded-for"]?.split(",")[0].trim()) || remote;
+}
+function limited(req, bucket, max, windowMs) {
+  const key = `${bucket}:${clientIp(req)}`;
+  const now = Date.now();
+  const h = hits.get(key);
+  if (!h || h.resetAt < now) {
+    hits.set(key, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+  return ++h.count > max;
+}
 const readCookie = (req, name) => req.headers.cookie?.match(new RegExp(`(?:^|; )${name}=([^;]+)`))?.[1];
 
 function getSession(req) {
@@ -240,7 +264,7 @@ export const server = http.createServer(async (req, res) => {
   const path = req.url.split("?")[0];
 
   try {
-    if (req.method === "GET" && path.startsWith("/dev")) return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(DEV_PAGE);
+    if (req.method === "GET" && path.startsWith("/dev") && DEV_PAGE_ON) return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(DEV_PAGE);
     if (req.method === "GET" && path === "/auth/google") return googleStart(res);
     if (req.method === "GET" && path === "/auth/google/callback") return await googleCallback(req, res);
     if (req.method === "GET" && path === "/api/timeline") {
@@ -270,7 +294,10 @@ export const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true }, { "set-cookie": cookie("bc_session", "", 0) });
     }
     if (path === "/api/check") return json(res, ...(await check(req, body)));
-    if (path === "/api/explain") return json(res, ...(await explain(body)));
+    if (path === "/api/explain") {
+      if (limited(req, "explain", 30, 60 * 60e3)) return json(res, 429, { error: "Too many requests. Try again later." });
+      return json(res, ...(await explain(body)));
+    }
     if (path === "/api/timeline/mine") {
       // POST, not GET: a list of someone's account domains shouldn't sit in URLs or access logs.
       const domains = body.domains;
@@ -283,7 +310,11 @@ export const server = http.createServer(async (req, res) => {
 
     const email = normalizeEmail(body.email);
     if (!email) return json(res, 400, { error: "Enter a valid email address." });
-    if (path === "/api/verify/start") return json(res, ...(await verifyStart(email)));
+    if (path === "/api/verify/start") {
+      // Per email is already 1/minute; per IP stops one visitor from mailing codes to many addresses.
+      if (limited(req, "codes", 10, 60 * 60e3)) return json(res, 429, { error: "Too many codes requested. Try again later." });
+      return json(res, ...(await verifyStart(email)));
+    }
     if (path === "/api/verify/confirm") return json(res, ...verifyConfirm(email, body.code));
     res.writeHead(404).end();
   } catch {
@@ -293,7 +324,7 @@ export const server = http.createServer(async (req, res) => {
 
 if (import.meta.main) {
   server.listen(PORT, "localhost", () => {
-    console.log(`Breach City checker on http://localhost:${PORT}`);
+    console.log(`Breach City checker on http://localhost:${PORT}${PUBLIC_URL ? ` (public: ${PUBLIC_URL}, /dev ${DEV_PAGE_ON ? "on" : "off"})` : ""}`);
     console.log(`  email codes: ${process.env.RESEND_API_KEY ? "sent with Resend" : "printed here (no RESEND_API_KEY)"}`);
     console.log(`  Google sign-in + inbox scan: ${process.env.GOOGLE_CLIENT_ID ? "on" : "off (no GOOGLE_CLIENT_ID)"}`);
     console.log(`  Tiger Data timeline + service breaches: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL; using in-memory catalog)"}`);

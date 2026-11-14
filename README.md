@@ -29,6 +29,8 @@ It serves `http://localhost:8787`. Get the shared `checker/.env` (Google, Tiger 
 
 **Frontend:** serve the repo root over HTTP on `localhost`, e.g. `python -m http.server 5173 --bind localhost`, and open it at `http://localhost:5173/…`. Import the backend helpers from `checker/checker.js`.
 
+**On a real domain (Vultr):** [deploy/DEPLOY.md](deploy/DEPLOY.md) puts everything on one server with HTTPS, about 15 copy-paste commands.
+
 **For the demo, use `city@demo.test`:** 20 real services with real breach history, fully offline, no server needed.
 
 ## Building the frontend: the 30-second version

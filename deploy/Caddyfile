@@ -1,0 +1,17 @@
+# Caddy: automatic HTTPS for the domain, the checker API on the same origin, the repo's static files for everything else.
+# Replace your-domain.com (see DEPLOY.md), then: sudo cp deploy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+your-domain.com {
+	encode gzip
+
+	# Never serve secrets or internals, even if they end up in the folder by mistake
+	@hidden path /.git* /*/.env* /.env* /checker/node_modules/* /deploy/*
+	respond @hidden 404
+
+	# The checker (node server.js, listening on localhost only)
+	@backend path /api/* /auth/*
+	reverse_proxy @backend localhost:8787
+
+	# The frontend and checker/checker.js, served as plain files
+	root * /srv/breach-city
+	file_server
+}

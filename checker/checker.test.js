@@ -230,5 +230,14 @@ if (process.env.LIVE || process.argv.includes("--live")) {
 
 assert.equal((await post("/api/logout", {}, { cookie: session })).status, 200);
 assert.equal((await post("/api/check", {}, { cookie: session })).status, 401);
+
+// Per-IP rate limit: at most 10 code requests an hour (different emails, so the per-email minute rule doesn't apply).
+// Runs last because it uses up this IP's budget.
+const quiet = console.log;
+console.log = () => {};
+const codeStatuses = [];
+for (let i = 0; i < 11; i++) codeStatuses.push((await post("/api/verify/start", { email: `ratelimit${i}@example.com` })).status);
+console.log = quiet;
+assert.equal(codeStatuses.at(-1), 429);
 server.close();
 console.log("checker ok");
