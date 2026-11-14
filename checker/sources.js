@@ -117,7 +117,10 @@ function serviceName(display, domain) {
   return looksLikePerson(display) || /\d/.test(display) ? prettyLabel(domain) : display;
 }
 
-/** [{from: 'Netflix <info@mailer.netflix.com>', subject, date}] -> one account per service, earliest date kept. */
+/**
+ * [{from: 'Netflix <info@mailer.netflix.com>', subject, date}] -> one account per service.
+ * firstSeen/lastSeen are the earliest/latest *sign-up-style* emails found, not all mail from that service.
+ */
 export function sendersToAccounts(senders) {
   const found = new Map(); // serviceKey -> account
   for (const { from, subject = "", date } of senders) {
@@ -137,10 +140,12 @@ export function sendersToAccounts(senders) {
       domain = /^[\w-]+(\.[\w-]+)+$/.test(name) ? baseDomain(name) : `${name.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`;
     }
     const key = serviceKey(domain);
-    const a = found.get(key);
-    if (!a) found.set(key, { name, domain, firstSeen: date });
+    let a = found.get(key);
+    if (!a) found.set(key, (a = { name, domain, firstSeen: date, lastSeen: date, signInWithGoogle: Boolean(shared) }));
     else {
       if (date && (!a.firstSeen || date < a.firstSeen)) a.firstSeen = date;
+      if (date && (!a.lastSeen || date > a.lastSeen)) a.lastSeen = date;
+      if (shared) a.signInWithGoogle = true;
       // Same service from another domain (facebookmail.com + facebook.com, hinge.co + hinge.com): keep the plain one, .com first.
       const plain = (d) => d.startsWith(`${key}.`);
       if (plain(domain) && (!plain(a.domain) || (domain.endsWith(".com") && !a.domain.endsWith(".com")))) Object.assign(a, { name, domain });

@@ -3,8 +3,8 @@
 import http from "node:http";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { accountId, lookupDomains, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
-import { checkXon, scanInbox } from "./sources.js";
-import { serviceBreaches, timeline } from "./db.js";
+import { checkXon, getCatalog, scanInbox } from "./sources.js";
+import { news, personalTimeline, serviceBreaches, timeline } from "./db.js";
 
 const PORT = Number(process.env.PORT) || 8787;
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -197,6 +197,25 @@ Return JSON: "summary" (2-3 sentences: what happened and what it means for them)
   }
 }
 
+// --- Service logos for building signs ---
+// Proxied so the browser never asks xposedornot.com for "the logos of this user's accounts" (that list is personal).
+// Only catalog logo URLs on xposedornot.com are fetched, looked up by breach id, so this can't fetch arbitrary URLs.
+const logoCache = new Map(); // breach id -> { type, body }; ponytail: ~800 logos max at ~2 KB each
+async function logo(req, res) {
+  const id = new URL(req.url, "http://localhost").searchParams.get("breach");
+  let hit = logoCache.get(id);
+  if (!hit) {
+    const url = (await getCatalog().catch(() => [])).find((b) => b.breachID === id)?.logo;
+    if (!url || new URL(url).host !== "xposedornot.com") return res.writeHead(404).end();
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+    const type = r?.headers.get("content-type") ?? "";
+    if (!r?.ok || !type.startsWith("image/")) return res.writeHead(404).end();
+    hit = { type, body: Buffer.from(await r.arrayBuffer()) };
+    logoCache.set(id, hit);
+  }
+  res.writeHead(200, { "content-type": hit.type, "cache-control": "public, max-age=86400" }).end(hit.body);
+}
+
 // --- Live check for the signed-in email ---
 
 async function check(req, body) {
@@ -228,6 +247,12 @@ export const server = http.createServer(async (req, res) => {
       const rows = await timeline().catch(() => null);
       return rows ? json(res, 200, rows) : json(res, 503, { error: "Timeline unavailable." });
     }
+    if (req.method === "GET" && path === "/api/logo") return await logo(req, res);
+    if (req.method === "GET" && path === "/api/news") {
+      const limit = new URL(req.url, "http://localhost").searchParams.get("limit");
+      const n = await news(limit ?? 10).catch(() => null);
+      return n ? json(res, 200, n) : json(res, 503, { error: "Breach news unavailable." });
+    }
     if (req.method !== "POST") return res.writeHead(404).end();
     // JSON only: forces a CORS preflight, so other sites can't post here from a plain form.
     if (!req.headers["content-type"]?.startsWith("application/json")) return res.writeHead(415).end();
@@ -235,7 +260,7 @@ export const server = http.createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) {
       raw += chunk;
-      if (raw.length > 1024) return res.writeHead(413).end();
+      if (raw.length > 32 * 1024) return res.writeHead(413).end(); // fits ~500 domains for /api/timeline/mine
     }
     let body = {};
     try { body = JSON.parse(raw || "{}"); } catch {}
@@ -246,6 +271,15 @@ export const server = http.createServer(async (req, res) => {
     }
     if (path === "/api/check") return json(res, ...(await check(req, body)));
     if (path === "/api/explain") return json(res, ...(await explain(body)));
+    if (path === "/api/timeline/mine") {
+      // POST, not GET: a list of someone's account domains shouldn't sit in URLs or access logs.
+      const domains = body.domains;
+      if (!Array.isArray(domains) || domains.length > 500 || !domains.every((d) => typeof d === "string" && /^[a-z0-9.-]{3,100}$/.test(d))) {
+        return json(res, 400, { error: "Send { domains: [\"adobe.com\", ...] }." });
+      }
+      const rows = await personalTimeline(domains).catch(() => null);
+      return rows ? json(res, 200, rows) : json(res, 503, { error: "Timeline unavailable." });
+    }
 
     const email = normalizeEmail(body.email);
     if (!email) return json(res, 400, { error: "Enter a valid email address." });

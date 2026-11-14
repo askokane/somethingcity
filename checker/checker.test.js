@@ -57,12 +57,43 @@ assert.deepEqual(sendersToAccounts([
   { from: "Google <no-reply@accounts.google.com>", subject: "You shared some Google Account info with Spotify.", date: "2026-11-14" },
   { from: "Google <no-reply@accounts.google.com>", subject: "Welcome to Google on your new phone", date: "2026-11-13" },
 ]), [
-  { name: "Netflix", domain: "netflix.com", firstSeen: "2019-02-03" },
-  { name: "Github", domain: "github.com", firstSeen: null },
-  { name: "Canva", domain: "canva.com", firstSeen: "2026-11-14" },
-  { name: "Spotify", domain: "spotify.com", firstSeen: "2026-11-14" },
-  { name: "Google", domain: "google.com", firstSeen: "2026-11-13" },
+  { name: "Netflix", domain: "netflix.com", firstSeen: "2019-02-03", lastSeen: "2021-05-01", signInWithGoogle: false },
+  { name: "Github", domain: "github.com", firstSeen: null, lastSeen: null, signInWithGoogle: false },
+  { name: "Canva", domain: "canva.com", firstSeen: "2026-11-14", lastSeen: "2026-11-14", signInWithGoogle: true },
+  { name: "Spotify", domain: "spotify.com", firstSeen: "2026-11-14", lastSeen: "2026-11-14", signInWithGoogle: true },
+  { name: "Google", domain: "google.com", firstSeen: "2026-11-13", lastSeen: "2026-11-13", signInWithGoogle: false },
 ]);
+
+// Dashboard stats from one check (fixed "now" so ages are stable)
+const { summarize } = await import("./checker.js");
+const s = summarize(city, Date.parse("2026-11-14"));
+assert.deepEqual([s.accounts, s.yourDataBreached, s.serviceBreached, s.noKnownBreach], [20, 2, 9, 9]);
+assert.ok(s.exposureScore > 0 && s.exposureScore <= 100);
+assert.equal(s.fixFirst[0].name, "MyFitnessPal"); // password leak ranks first
+assert.ok(s.breachedWhileMember.some((w) => w.name === "Adobe" && w.date.startsWith("2013")));
+assert.equal(s.exposedData.find((d) => d.type === "Passwords").breaches, 1);
+assert.equal(s.signInWithGoogle, 7);
+assert.ok(s.dormant > 0 && s.industries.length > 0 && s.largestBreach.records > 1e8 && s.footprintByYear.length > 5);
+// Building signs and the ready-to-draw city
+const { shortName, cityLayout } = await import("./checker.js");
+assert.equal(shortName("The Higgsfield Team"), "Higgsfield");
+assert.equal(shortName("Microsoft  Careers"), "Microsoft");
+assert.equal(shortName("♟Chess.com"), "Chess.com");
+assert.equal(shortName("Penn State Undergraduate Admissions"), "Penn State");
+assert.equal(shortName("Supercalifragilisticexpialidocious"), "Supercalifrag…");
+const layout = cityLayout(city, { now: Date.parse("2026-11-14") });
+assert.equal(layout.buildings.length, 20);
+assert.equal(layout.district, null);
+assert.deepEqual(layout.buildings.slice(0, 2).map((b) => b.state), ["breached", "breached"]); // red first
+assert.equal(layout.buildings.find((b) => b.domain === "amazon.com").height, 5); // since 2011
+assert.equal(layout.buildings.find((b) => b.domain === "adobe.com").logo, "/api/logo?breach=Adobe");
+assert.equal(layout.buildings.find((b) => b.domain === "github.com").logo, null); // no breach on record: initials
+const crowded = cityLayout(city, { max: 10 });
+assert.equal(crowded.buildings.length + crowded.district.count, 20);
+assert.ok(crowded.buildings.filter((b) => b.state !== "clear").length === 9 && crowded.district.count === 11); // calm ones fold first
+
+const empty = summarize(await checkAccount("unknown@demo.test"));
+assert.deepEqual([empty.accounts, empty.exposureScore, empty.fixFirst.length, empty.oldestLeak], [0, 0, 0, null]);
 
 // Cleanup cases from a real 145-account inbox
 const real = sendersToAccounts([
@@ -135,12 +166,28 @@ else {
   assert.ok(ex.status === 200 && e.summary && e.steps.length, `gemini: ${ex.status} ${JSON.stringify(e)}`);
   console.log(`gemini: ${e.summary.slice(0, 80)}…`);
 }
+assert.equal((await post("/api/timeline/mine", { domains: ["not a domain!"] })).status, 400);
 const tl = await fetch(`${base}/api/timeline`);
 if (!process.env.DATABASE_URL) assert.equal(tl.status, 503); // not configured
 else {
   const years = await tl.json(); // Tiger Data, loaded with `npm run load-timeline`
   assert.ok(years.length > 5 && years.every((y) => y.year > 1990 && y.breaches > 0));
   console.log(`timeline: ${years.length} years, ${years.reduce((n, y) => n + y.breaches, 0)} breaches`);
+  const mineTl = await (await post("/api/timeline/mine", { domains: ["adobe.com", "canva.com"] })).json();
+  assert.deepEqual(mineTl.filter((y) => y.yours.length).map((y) => [y.year, y.yours]), [[2013, ["Adobe"]], [2019, ["Canva"]]]);
+}
+
+// Breach news: Tiger Data when configured, else the catalog (needs network, so live only)
+if (process.env.LIVE || process.argv.includes("--live")) {
+  const nw = await (await fetch(`${base}/api/news?limit=3`)).json();
+  assert.ok(nw.recent.length === 3 && nw.biggest.length === 3 && nw.thisYear.breaches > 0);
+  assert.ok(nw.recent[0].addedDate >= nw.recent[2].addedDate && nw.biggest[0].records >= nw.biggest[2].records);
+  assert.ok(nw.biggest.every((b) => b.domain)); // named services, no anonymous combo lists
+  assert.ok(!/<[a-z]/i.test(nw.recent[0].description ?? "")); // HTML stripped
+  console.log(`news (${nw.source}): latest ${nw.recent[0].name} ${nw.recent[0].addedDate}, biggest ${nw.biggest[0].name}`);
+  const lg = await fetch(`${base}/api/logo?breach=Adobe`);
+  assert.ok(lg.ok && lg.headers.get("content-type").startsWith("image/") && (await lg.arrayBuffer()).byteLength > 100);
+  assert.equal((await fetch(`${base}/api/logo?breach=NoSuchBreach`)).status, 404);
 }
 
 const printed = [];
