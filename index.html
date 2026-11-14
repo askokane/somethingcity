@@ -22,7 +22,7 @@
         <div class="header-actions"><span class="demo-label">LOCAL DEMO</span><button class="header-button" id="reset-button" type="button" title="Reset demo">↺</button><button class="run-button" id="check-button" type="button"><span>↻</span> Run checks</button></div>
       </header>
 
-      <nav class="main-nav" aria-label="Main navigation"><button class="nav-link is-active" data-view="overview" type="button">City</button><button class="nav-link" data-view="accounts" type="button">Accounts</button><button class="nav-link" data-view="inbox" type="button">Inbox scan</button><button class="nav-link" data-view="timeline" type="button">Timeline</button><span class="service-status" id="service-status">DEMO MODE</span><button class="nav-link nav-check" id="nav-check" type="button">Check</button><button class="nav-google" id="google-button" type="button">Google sign in</button></nav>
+      <nav class="main-nav" aria-label="Main navigation"><button class="nav-link is-active" data-view="overview" type="button">City</button><button class="nav-link" data-view="accounts" type="button">Accounts</button><button class="nav-link" data-view="inbox" type="button">Inbox scan</button><button class="nav-link" data-view="timeline" type="button">Timeline</button><button class="nav-link" data-view="history" type="button">History</button><span class="service-status" id="service-status">DEMO MODE</span><button class="nav-link nav-check" id="nav-check" type="button">Check</button><button class="nav-google" id="google-button" type="button">Google sign in</button></nav>
       <section class="page-heading">
         <div><p class="eyebrow">DIGITAL EXPOSURE / CITY VIEW</p><h1>A city built from <em>your accounts.</em></h1></div>
         <p class="heading-note">Select a building to open its report and smoothly focus it.<br /><span>Drag to pan · scroll to zoom</span></p>
@@ -72,15 +72,15 @@
           <div class="city-stats-phone-notch" aria-hidden="true"><span></span></div>
           <div class="city-stats-screen">
           <div class="city-stats-phonebar" aria-hidden="true"><span>GOTHAM / 04</span><span>DEMO</span></div>
-          <button class="city-stats-close" id="city-stats-close" type="button" aria-label="Close account statistics">X</button>
-          <p class="eyebrow">ACCOUNT MONITOR</p>
+          <button class="city-stats-close" id="city-stats-close" type="button" aria-label="Close report">X</button>
+          <p class="eyebrow" id="city-stats-eyebrow">ACCOUNT MONITOR</p>
           <h2 id="city-stats-title">Account overview</h2>
           <p class="city-stats-subtitle" id="city-stats-subtitle">All monitored accounts</p>
           <div class="city-stats-cards" id="city-stats-cards"></div>
           <div class="city-stats-bar" id="city-stats-bar" aria-label="Account status distribution"></div>
-          <p class="city-stats-list-title">ACCOUNT STATUS <span id="city-stats-list-total"></span></p>
+          <p class="city-stats-list-title"><span id="city-stats-list-name">ACCOUNT STATUS</span> <span id="city-stats-list-total"></span></p>
           <ul class="city-stats-list" id="city-stats-list"></ul>
-          <p class="city-stats-note">No match means no known match in this sample source.</p>
+          <p class="city-stats-note" id="city-stats-note">No match means no known match in this sample source.</p>
           </div>
         </section>
       </div>

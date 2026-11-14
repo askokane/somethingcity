@@ -289,3 +289,23 @@
 @media (prefers-reduced-motion: reduce) {
   .city-stats-dialog { animation: none; }
 }
+
+/* Breaches older than the recent window: muted, not alarming. */
+.city-stats-row.status-historical { border-left-color: #7d8a96; }
+.city-stats-row.status-historical .city-stats-status { color: #b7c2cc; border-color: #7d8a96; }
+
+/* Cards with a sublist are buttons: same look, plus a hint that they open. */
+button.city-stats-card { width: 100%; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+button.city-stats-card:hover, button.city-stats-card:focus-visible { background: #22394d; outline: 2px solid #ffd45e; outline-offset: -2px; }
+button.city-stats-card span::after { content: " \203A"; color: #ffd45e; }
+
+/* The sublist slides over the phone screen, under the notch. */
+.city-stats-sheet { position: absolute; z-index: 3; inset: 44px 10px 10px; display: flex; flex-direction: column; gap: 8px; padding: 12px; overflow: auto; border: 2px solid #526476; background: #0f1f2e; box-shadow: 0 8px 24px #0009; font: 11px/1.5 "Courier New", monospace; color: #c5d5ce; }
+.city-stats-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.city-stats-sheet-head strong { color: #ffe480; letter-spacing: .08em; }
+.city-stats-sheet-head button { border: 1px solid #526476; background: #1a2d3e; color: #ffe480; font: 700 10px "Courier New", monospace; padding: 4px 8px; cursor: pointer; }
+.city-stats-sheet p { margin: 0; color: #a9c2c0; }
+.city-stats-sheet ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.city-stats-sheet li { padding: 7px 8px; border-left: 3px solid #e58268; background: #1a2d3e; }
+.city-stats-sheet li strong, .city-stats-sheet li small { display: block; }
+.city-stats-sheet li small { margin-top: 2px; color: #a9c2c0; }
