@@ -384,7 +384,7 @@ const plotParkRoots = [];
 // random variant and quarter-turn fixed per plot and random window lights. Garden blocks are walled parks.
 // Re-run whenever accounts change.
 const SLUMS = new Set(['West Harlow', 'Chinatown', 'Reatton']);
-const ESTATE_CLEARING = [12, 12]; // open lawn at the centre of Wayne Estate, kept for the Wayne Manor model
+const ESTATE_CLEARING = [20, 16]; // open lawn at the centre of Wayne Estate, where Wayne Manor stands
 const FAVELA_ISLANDS = new Set(['Bristol Township', 'South Channel Island', 'South Hinkley']);
 const isFavelaPlot = (slot) => FAVELA_ISLANDS.has(blocks[slot.block].island) || SLUMS.has(blocks[slot.block].district);
 let favelaModels = [];
@@ -666,8 +666,73 @@ function updateShips(time) {
   }
 }
 
+// Wayne Manor: Daniel's Batcave exterior is the manor standing on a cliff with the cave inside. Scaled to Wayne Estate's
+// clearing and sunk so the manor stands at ground level and the cliff and cave sit underground, out of sight.
+const MANOR_SCALE = 0.4;
+let manorPlaced = false;
+async function placeWayneManor() {
+  if (manorPlaced) return;
+  manorPlaced = true;
+  const estate = blocks.find((b) => b.district === 'Wayne Estate');
+  const model = await loadModel('./models/buildings/batcave_exterior_8bit.glb').catch(() => null);
+  if (!estate || !model) return;
+  const manor = model.getObjectByName('SM_Batcave_Manor');
+  const manorBase = manor ? new THREE.Box3().setFromObject(manor).min.y : 9.9;
+  const bounds = new THREE.Box3().setFromObject(model);
+  const centre = bounds.getCenter(new THREE.Vector3());
+  model.scale.setScalar(MANOR_SCALE);
+  model.position.set(estate.x - centre.x * MANOR_SCALE, 0.23 - manorBase * MANOR_SCALE, estate.z - centre.z * MANOR_SCALE);
+  model.traverse((node) => { node.userData.landmark = 'Wayne Manor'; if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
+  flickerWindows(model);
+  scene.add(model);
+  landmarkRoots.push(model);
+}
+
+// The Bat-Signal: Tai's searchlight on GCPD Headquarters' roof, throwing a pale beam into the sky with the bat at its end.
+let signalPlaced = false;
+async function placeBatSignal() {
+  if (signalPlaced) return;
+  const gcpd = landmarkRoots.find((root) => root.userData.landmark === 'GCPD Headquarters');
+  const lamp = await loadModel('./models/everything-else/gotham_bat_signal.glb').catch(() => null);
+  if (!gcpd || !lamp) return;
+  signalPlaced = true;
+  const roof = new THREE.Box3().setFromObject(gcpd);
+  const top = new THREE.Vector3((roof.min.x + roof.max.x) / 2, roof.max.y, (roof.min.z + roof.max.z) / 2);
+  lamp.scale.setScalar(0.7);
+  lamp.position.copy(top);
+  lamp.rotation.y = Math.PI * 0.75; // aim the lamp toward the camera side of the sky
+  scene.add(lamp);
+  // Beam: an open cone tipped back toward the sky, additive and faint; the bat sits where it ends.
+  const length = 46;
+  const beam = new THREE.Mesh(
+    new THREE.CylinderGeometry(4.2, 0.35, length, 24, 1, true),
+    new THREE.MeshBasicMaterial({ color: '#fff1b8', transparent: true, opacity: 0.13, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  const tilt = new THREE.Group();
+  tilt.position.copy(top).add(new THREE.Vector3(0, 2.6, 0));
+  tilt.rotation.set(0.35, 0, -0.25);
+  beam.position.y = length / 2;
+  tilt.add(beam);
+  const canvas = document.createElement('canvas');
+  canvas.width = 26; canvas.height = 12;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = 'rgba(255, 236, 160, 0.95)';
+  ctx.beginPath(); ctx.ellipse(13, 6, 12.5, 5.6, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#0b0d12';
+  ['YY...Y.Y...YY', 'YYYY.YYY.YYYY', 'YYYYYYYYYYYYY', '.YYYYYYYYYYY.', '..YY.YYY.YY..', '......Y......'].forEach((row, y) => [...row].forEach((c, x) => { if (c === 'Y') ctx.fillRect(6.5 + x, 3 + y, 1, 1); }));
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  const bat = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false, opacity: 0.85 }));
+  bat.scale.set(9, 4.2, 1);
+  bat.position.y = length;
+  tilt.add(bat);
+  scene.add(tilt);
+}
+
 function finishInitialLoad() {
   if (!environmentReady || !accountModelsReady) return;
+  placeWayneManor();
+  placeBatSignal();
   launchShips();
   buildSuburbs();
   syncPlotParks();
@@ -1750,7 +1815,7 @@ renderer.domElement.addEventListener('pointerup', (event) => {
     showAccountReport(node.userData.accountId);
   } else if (node?.userData.landmark) {
     const name = node.userData.landmark;
-    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham', 'Gotham Bank': 'bank', 'GCPD Headquarters': 'gcpd', 'Cobblepot Manor': 'cobblepot', 'Blackgate Penitentiary': 'blackgate', 'Elliot Memorial': 'elliot' }[name];
+    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham', 'Gotham Bank': 'bank', 'GCPD Headquarters': 'gcpd', 'Cobblepot Manor': 'cobblepot', 'Blackgate Penitentiary': 'blackgate', 'Elliot Memorial': 'elliot', 'Wayne Manor': 'wayne' }[name];
     if (key) landmarkReports[key]();
     else openPhone({ eyebrow: name.toUpperCase(), title: name, subtitle: 'City-wide account overview', cards: [['ACCOUNTS MONITORED', accounts.length, 'total']], counts: countStatuses(accounts), listTitle: 'ACCOUNT STATUS', rows: accounts.map(a => [a.name, a.district, accountBadge(a), a.status]), note: 'Landmark model pending. No match means no known match in this source.', focus: landmarks.find(l => l.name === name) ? blocks[landmarks.find(l => l.name === name).block] : blocks[0] });
   }

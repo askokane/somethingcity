@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { beaches, beachPoint } from './coastal-plan.js';
-import { blocks } from './city-plan.js';
+import { blocks, isOnLand } from './city-plan.js';
 
 export async function createCoastalScene() {
   const loader = new GLTFLoader();
@@ -94,22 +94,28 @@ export async function createCoastalScene() {
   const west = beaches.find((b) => b.name === 'Reatton Beach');
   if (west) { const p = beachPoint(west, 7.5, 0); placeWaterfront('Fishing_Pier_People', p.x, .08, p.z, west.rotation); }
 
-  // Haysville Docks: marina, crane, warehouse, containers, bollards and a breakwater on the dock block's sea face (east).
-  const dock = blocks.find((b) => b.format === 'dockyard');
-  if (dock) {
-    const face = dock.x + 6; // the block's east shoreline
-    placeWaterfront('Marina_Floating_Slips', face, -.12, dock.z - 2, Math.PI / 2);
-    placeBoat('sailboat', face + 5.6, -.05, dock.z - 6, 0, .78);
-    placeBoat('fishing', face + 9, -.08, dock.z + 2, 0, .82);
-    placeBoat('rowboat', face + 12.1, -.02, dock.z - 5.8, 0, .78);
-    placeWaterfront('Gantry_Crane_Haysville', face - 1.5, .23, dock.z + 3, 0, .92);
-    placeWaterfront('Warehouse_Haysville_Docks', dock.x - 2, .23, dock.z, Math.PI / 2, .7);
-    placeWaterfront('Container_Rust', dock.x + 2, .23, dock.z - 3);
-    placeWaterfront('Container_Teal', dock.x + 2, 2.81, dock.z - 3);
-    placeWaterfront('Container_Slate', dock.x + 2, .23, dock.z + 3.5);
-    for (const dz of [-6, -2, 2, 6]) placeWaterfront('Harbor_Bollard', face - .4, .23, dock.z + dz, 0, 1.15);
-    placeWaterfront('Breakwater_Harbor_Light', face, -.28, dock.z + 15, Math.PI / 2, 1.0);
-    placeWaterfront('Riprap_Rock_Pile', face + .4, -.25, dock.z - 13, 0, 1.15);
+  // Ports: marina, crane, warehouse, containers, bollards and a breakwater on each dock block's sea face. The kit is
+  // modelled big (the crane alone is 23 units), so it is scaled to fit a 9-unit block. Kit pieces face +Z offshore;
+  // a port on a west shore is the same layout mirrored.
+  const PORT_SCALE = 0.38;
+  for (const dock of blocks.filter((b) => b.format === 'dockyard')) {
+    const side = isOnLand(dock.x + 12, dock.z) ? -1 : 1; // which side is the sea
+    const face = dock.x + side * 6;
+    const out = (d) => face + side * d; // d > 0: further offshore
+    const offshore = side > 0 ? Math.PI / 2 : -Math.PI / 2; // turns the kit's +Z toward the sea
+    const k = PORT_SCALE;
+    placeWaterfront('Marina_Floating_Slips', out(2.6), -.12, dock.z - 1.5, offshore, k);
+    placeBoat('sailboat', out(3.4), -.05, dock.z - 3.2, side > 0 ? 0 : Math.PI, .42);
+    placeBoat('fishing', out(4.4), -.08, dock.z + .6, side > 0 ? 0 : Math.PI, .45);
+    placeBoat('rowboat', out(5.4), -.02, dock.z - 3.0, side > 0 ? 0 : Math.PI, .45);
+    placeWaterfront('Gantry_Crane_Haysville', out(-1.6), .23, dock.z + 2.6, side > 0 ? 0 : Math.PI, k);
+    placeWaterfront('Warehouse_Haysville_Docks', dock.x - side * 2.4, .23, dock.z - 1, Math.PI / 2, k);
+    placeWaterfront('Container_Rust', dock.x + side * .4, .23, dock.z - 2.6, 0, k);
+    placeWaterfront('Container_Teal', dock.x + side * .4, .23 + 2.6 * k, dock.z - 2.6, 0, k);
+    placeWaterfront('Container_Slate', dock.x + side * .4, .23, dock.z + 3.2, 0, k);
+    for (const dz of [-3.5, -1.2, 1.2, 3.5]) placeWaterfront('Harbor_Bollard', out(-.35), .23, dock.z + dz, 0, .9);
+    placeWaterfront('Breakwater_Harbor_Light', out(.2), -.28, dock.z + 9.5, offshore, k);
+    placeWaterfront('Riprap_Rock_Pile', out(.4), -.25, dock.z - 7.5, 0, .6);
   }
   // Ace Chemicals' shore: a line of bollards (the landmark fills its block, so no containers).
   const ace = blocks.find((b) => b.format === 'landmark' && b.district === 'Haysville');
@@ -147,7 +153,8 @@ export async function createCoastalScene() {
     }
     if (b.format === 'dockyard') {
       place('Lifeguard_Hut', b.x - 2, .23, b.z - 2);
-      place('Harbor_Jetty', b.x + 9, 0, b.z, Math.PI / 2); // off the block's east (sea) edge
+      const sea = isOnLand(b.x + 12, b.z) ? -1 : 1;
+      place('Harbor_Jetty', b.x + sea * 9, 0, b.z + 6, sea > 0 ? Math.PI / 2 : -Math.PI / 2); // off the block's sea edge, clear of the marina
       place('Coast_Bench', b.x - 2, .23, b.z + 2, Math.PI / 2);
     }
   }
