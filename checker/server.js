@@ -1,0 +1,220 @@
+// Breach City live checker server. Run: node checker/server.js
+// Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PORT
+import http from "node:http";
+import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
+import { accountId, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
+import { checkXon, scanInbox } from "./sources.js";
+import { timeline } from "./db.js";
+
+const PORT = Number(process.env.PORT) || 8787;
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const REDIRECT_URI = `http://localhost:${PORT}/auth/google/callback`;
+const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+const MIN = 60e3;
+
+// ponytail: in-memory state, single process, wiped on restart. Fine for a demo; use Redis/DB if it ever runs on >1 server.
+const codes = new Map(); // email -> { hash, expires, tries, sentAt }
+const sessions = new Map(); // token -> { email, inbox, expires }
+const oauthStates = new Map(); // state -> expires
+
+const sha = (s) => createHash("sha256").update(s).digest();
+const json = (res, status, body, headers = {}) => res.writeHead(status, { "content-type": "application/json", ...headers }).end(JSON.stringify(body));
+const cookie = (name, value, maxAge) => `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+const readCookie = (req, name) => req.headers.cookie?.match(new RegExp(`(?:^|; )${name}=([^;]+)`))?.[1];
+
+function getSession(req) {
+  const s = sessions.get(readCookie(req, "bc_session"));
+  return s && s.expires > Date.now() ? s : null;
+}
+
+function startSession(email, inbox = null) {
+  const token = randomBytes(32).toString("hex");
+  sessions.set(token, { email, inbox, expires: Date.now() + 60 * MIN });
+  return cookie("bc_session", token, 3600);
+}
+
+// --- Email code: proves the person owns the address before we look it up ---
+
+async function sendCode(email, code) {
+  if (!process.env.RESEND_API_KEY) {
+    console.log(`[dev] verification code for ${maskEmail(email)}: ${code}`); // no email service configured
+    return "console";
+  }
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      from: process.env.EMAIL_FROM || "Breach City <onboarding@resend.dev>",
+      to: [email],
+      subject: `Your Breach City code: ${code}`,
+      text: `Your Breach City verification code is ${code}. It expires in 10 minutes. If you didn't ask for this, ignore this email.`,
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  console.log(`resend ${res.status}`);
+  if (!res.ok) throw new Error("send failed");
+  return "email";
+}
+
+async function verifyStart(email) {
+  const prev = codes.get(email);
+  if (prev && Date.now() - prev.sentAt < MIN) return [429, { error: "Wait a minute before asking for another code." }];
+  const code = String(randomInt(0, 1e6)).padStart(6, "0");
+  codes.set(email, { hash: sha(code), expires: Date.now() + 10 * MIN, tries: 0, sentAt: Date.now() });
+  try {
+    return [200, { sent: await sendCode(email, code) }];
+  } catch {
+    codes.delete(email);
+    return [502, { error: "Couldn't send the code. Try again shortly." }];
+  }
+}
+
+function verifyConfirm(email, code) {
+  const entry = codes.get(email);
+  if (!entry || entry.expires < Date.now()) return [400, { error: "Code expired. Ask for a new one." }];
+  if (++entry.tries > 5) {
+    codes.delete(email);
+    return [429, { error: "Too many tries. Ask for a new code." }];
+  }
+  if (!timingSafeEqual(entry.hash, sha(String(code ?? "").trim()))) return [400, { error: "That code doesn't match." }];
+  codes.delete(email);
+  return [200, { ok: true }, { "set-cookie": startSession(email) }];
+}
+
+// --- Google sign-in: proves ownership of a Gmail address and lets us scan its inbox (read-only, once) ---
+
+function googleStart(res) {
+  if (!process.env.GOOGLE_CLIENT_ID) return json(res, 503, { error: "Google sign-in isn't configured." });
+  const state = randomBytes(16).toString("hex");
+  oauthStates.set(state, Date.now() + 10 * MIN);
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.search = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    response_type: "code",
+    scope: "openid email https://www.googleapis.com/auth/gmail.readonly",
+    access_type: "online",
+    prompt: "consent",
+    state,
+  });
+  res.writeHead(302, { location: url.href, "set-cookie": cookie("bc_oauth", state, 600) }).end();
+}
+
+async function googleCallback(req, res) {
+  const back = (result, headers = {}) => res.writeHead(302, { location: `${FRONTEND_URL}/?signin=${result}`, ...headers });
+  const params = new URL(req.url, "http://localhost").searchParams;
+  const state = params.get("state");
+  const valid = state && state === readCookie(req, "bc_oauth") && oauthStates.get(state) > Date.now();
+  oauthStates.delete(state);
+  if (!valid || !params.get("code")) return back("failed").end();
+
+  const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    body: new URLSearchParams({
+      code: params.get("code"),
+      client_id: process.env.GOOGLE_CLIENT_ID,
+      client_secret: process.env.GOOGLE_CLIENT_SECRET,
+      redirect_uri: REDIRECT_URI,
+      grant_type: "authorization_code",
+    }),
+    signal: AbortSignal.timeout(10000),
+  }).catch(() => null);
+  const tokens = tokenRes?.ok ? await tokenRes.json() : null;
+  if (!tokens?.id_token) return back("failed").end();
+
+  // Straight from Google's token endpoint over TLS, so the signature check can be skipped (OIDC Core 3.1.3.7).
+  const claims = JSON.parse(Buffer.from(tokens.id_token.split(".")[1], "base64url").toString());
+  const email = normalizeEmail(claims.email);
+  if (claims.aud !== process.env.GOOGLE_CLIENT_ID || !claims.email_verified || !email) return back("failed").end();
+
+  // The user can untick Gmail access on the consent screen; then we only have the verified email.
+  let inbox = null;
+  let why = "skipped: Gmail access not granted";
+  if (tokens.scope?.includes("gmail.readonly")) inbox = await scanInbox(tokens.access_token).catch((e) => ((why = `failed: ${e.message}`), null));
+  console.log(`google sign-in ${maskEmail(email)}: inbox scan ${inbox ? `found ${inbox.length} services` : why}`);
+  fetch(`https://oauth2.googleapis.com/revoke?token=${tokens.access_token}`, { method: "POST" }).catch(() => {}); // one scan, then let go
+
+  back(inbox ? "ok" : "no-inbox", { "set-cookie": [startSession(email, inbox), cookie("bc_oauth", "", 0)] }).end();
+}
+
+// --- Dev test page: sign in with Google and list linked accounts, no frontend needed ---
+// Set FRONTEND_URL=http://localhost:8787/dev to land here after Google sign-in.
+const DEV_PAGE = `<!doctype html><meta charset="utf-8"><title>Breach City checker</title>
+<body style="font:14px ui-monospace,monospace;max-width:900px;margin:2rem auto;padding:0 1rem">
+<h1 style="font-size:18px">Breach City checker (dev)</h1>
+<p><a href="/auth/google">Sign in with Google</a> · <a href="#" id="logout">Sign out</a></p>
+<pre id="out">Checking…</pre>
+<script type="module">
+const post = (p) => fetch(p, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+document.getElementById("logout").onclick = async (e) => { e.preventDefault(); await post("/api/logout"); location.href = "/dev"; };
+const r = await post("/api/check").then((x) => x.json());
+document.getElementById("out").textContent = r.status
+  ? \`\${r.label}: \${r.status} (\${r.source})\${r.error ? " - " + r.error : ""}\\n\${r.accounts.length} linked accounts, \${r.accounts.filter((a) => a.breached).length} breached\\n\\n\` +
+    r.accounts.map((a) => \`\${a.breached ? "BREACHED" : "ok      "}  \${a.name.slice(0, 28).padEnd(28)} \${a.domain.padEnd(26)} \${a.foundIn.join("+").padEnd(13)} \${a.firstSeen ?? ""}\`).join("\\n")
+  : (r.error ?? "Not signed in.");
+</script>`;
+
+// --- Live check for the signed-in email ---
+
+async function check(req, body) {
+  const session = getSession(req);
+  const email = body.email === undefined ? session?.email : normalizeEmail(body.email);
+  if (!session || email !== session.email) return [401, { error: "Verify this email first." }];
+  const result = await checkXon(email);
+  return [200, { id: await accountId(email), label: maskEmail(email), ...result, accounts: toAccounts(result.breaches, session.inbox ?? []) }];
+}
+
+export const server = http.createServer(async (req, res) => {
+  const origin = req.headers.origin;
+  if (origin && LOCAL_ORIGIN.test(origin)) {
+    res.setHeader("access-control-allow-origin", origin);
+    res.setHeader("access-control-allow-credentials", "true");
+    res.setHeader("access-control-allow-headers", "content-type");
+  }
+  if (req.method === "OPTIONS") return res.writeHead(204).end();
+  const path = req.url.split("?")[0];
+
+  try {
+    if (req.method === "GET" && path.startsWith("/dev")) return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(DEV_PAGE);
+    if (req.method === "GET" && path === "/auth/google") return googleStart(res);
+    if (req.method === "GET" && path === "/auth/google/callback") return await googleCallback(req, res);
+    if (req.method === "GET" && path === "/api/timeline") {
+      const rows = await timeline().catch(() => null);
+      return rows ? json(res, 200, rows) : json(res, 503, { error: "Timeline unavailable." });
+    }
+    if (req.method !== "POST") return res.writeHead(404).end();
+    // JSON only: forces a CORS preflight, so other sites can't post here from a plain form.
+    if (!req.headers["content-type"]?.startsWith("application/json")) return res.writeHead(415).end();
+
+    let raw = "";
+    for await (const chunk of req) {
+      raw += chunk;
+      if (raw.length > 1024) return res.writeHead(413).end();
+    }
+    let body = {};
+    try { body = JSON.parse(raw || "{}"); } catch {}
+
+    if (path === "/api/logout") {
+      sessions.delete(readCookie(req, "bc_session"));
+      return json(res, 200, { ok: true }, { "set-cookie": cookie("bc_session", "", 0) });
+    }
+    if (path === "/api/check") return json(res, ...(await check(req, body)));
+
+    const email = normalizeEmail(body.email);
+    if (!email) return json(res, 400, { error: "Enter a valid email address." });
+    if (path === "/api/verify/start") return json(res, ...(await verifyStart(email)));
+    if (path === "/api/verify/confirm") return json(res, ...verifyConfirm(email, body.code));
+    res.writeHead(404).end();
+  } catch {
+    if (!res.headersSent) json(res, 500, { error: "Something went wrong." }); // no details: they could contain user data
+  }
+});
+
+if (import.meta.main) {
+  server.listen(PORT, "localhost", () => {
+    console.log(`Breach City checker on http://localhost:${PORT}`);
+    console.log(`  email codes: ${process.env.RESEND_API_KEY ? "sent with Resend" : "printed here (no RESEND_API_KEY)"}`);
+    console.log(`  Google sign-in + inbox scan: ${process.env.GOOGLE_CLIENT_ID ? "on" : "off (no GOOGLE_CLIENT_ID)"}`);
+    console.log(`  Tiger Data timeline: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL)"}`);
+  });
+}

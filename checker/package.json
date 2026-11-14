@@ -1,0 +1,14 @@
+{
+  "name": "breach-city-checker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.js",
+    "test": "node checker.test.js",
+    "test:live": "node --env-file-if-exists=.env checker.test.js --live",
+    "load-timeline": "node --env-file-if-exists=.env db.js"
+  },
+  "dependencies": {
+    "postgres": "^3.4.5"
+  }
+}
