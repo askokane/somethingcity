@@ -18,13 +18,15 @@ const LANDMARKS = [
   { key: 'wayne', name: 'Wayne Tower', file: 'wayne_tower.glb', footprint: 11, height: 51, shows: 'Player card: account counts, exposure score (summarize: accounts, yourDataBreached, serviceBreached, exposureScore)' },
   { key: 'arkham', name: 'Arkham Asylum', file: 'arkham_asylum_8bit.glb', footprint: 19, height: 13.5, shows: 'Breached accounts (red + amber buildings, breachedWhileMember)' },
   { key: 'ace', name: 'Ace Chemicals', file: 'ace_chemicals_8bit.glb', footprint: 15, height: 16.5, shows: 'What leaked (exposedData, largestBreach, oldestLeak, newestLeak)' },
-  { key: 'bank', name: 'Gotham Bank', file: 'gotham_bank.glb', footprint: 15, height: 18, shows: 'All accounts (footprintByYear, signInWithGoogle, dormant)' },
-  { key: 'gcpd', name: 'GCPD HQ', file: 'gcpd_hq.glb', footprint: 15, height: 15, shows: 'To-do list (fixFirst, most urgent first)' },
-  { key: 'cobblepot', name: 'Cobblepot Manor', file: 'cobblepot_manor.glb', footprint: 16, height: 12, shows: 'Breach news + timeline (GET /api/news, industries)' },
-  { key: 'blackgate', name: 'Blackgate Penitentiary', file: 'blackgate_penitentiary.glb', footprint: 18, height: 12, shows: 'Resolved: GCPD to-dos the user ticked off (local state)' },
-  { key: 'elliot', name: 'Elliot Memorial', file: 'elliot_memorial.glb', footprint: 12, height: 10, shows: 'Couldn’t check (status unknown + re-check button)' },
+  { key: 'bank', name: 'Gotham Bank', file: 'gotham_bank_8bit.glb', footprint: 15, height: 18, shows: 'All accounts (footprintByYear, signInWithGoogle, dormant)' },
+  { key: 'gcpd', name: 'GCPD HQ', file: 'gcpd_headquarters_8bit.glb', footprint: 15, height: 15, shows: 'To-do list (fixFirst, most urgent first)' },
+  { key: 'cobblepot', name: 'Cobblepot Manor', file: 'cobblepot_manor_8bit.glb', footprint: 16, height: 12, shows: 'Breach news + timeline (GET /api/news, industries)' },
+  { key: 'blackgate', name: 'Blackgate Penitentiary', file: 'blackgate_penitentiary_8bit.glb', footprint: 18, height: 12, shows: 'Resolved: GCPD to-dos the user ticked off (local state)' },
+  { key: 'elliot', name: 'Elliot Memorial', file: 'elliot_memorial_hospital_8bit.glb', footprint: 12, height: 10, shows: 'Couldn’t check (status unknown + re-check button)' },
 ];
-const TOWER_MODEL = { name: 'Website tower', file: 'gotham_voxel_skyscraper.glb', footprint: TOWER_FOOTPRINT / UNITS_PER_METER, shows: 'One per website; height from account age, color from breach state' };
+// Daniel's ten towers live in models/account_buildings/; the planner previews them by tier.
+const TOWER_FILES = Array.from({ length: 10 }, (_, i) => `../account_buildings/account_building_${String(i + 1).padStart(2, '0')}.glb`);
+const TOWER_MODEL = { name: 'Website towers (10)', file: 'gotham_voxel_skyscraper.glb', footprint: TOWER_FOOTPRINT / UNITS_PER_METER, shows: 'One per website; height from account age, color from breach state' };
 const STATE_COLORS = { breached: 0xff7185, service: 0xffc857, clear: 0x67e6aa };
 
 // Scene: isometric orthographic camera like the app.
@@ -130,7 +132,8 @@ function render() {
       block.towers.forEach((tower, k) => {
         const [dx, dz] = PLOT_OFFSETS[k];
         const height = meters(tower.meters);
-        const body = fitted(models.get(TOWER_MODEL.file), TOWER_FOOTPRINT, height, STATE_COLORS[tower.state]);
+        const variant = Math.max(0, Math.min(9, Math.round((tower.floors - vars.minFloors) / Math.max(1, vars.maxFloors - vars.minFloors) * 9)));
+        const body = fitted(models.get(TOWER_FILES[variant]) ?? models.get(TOWER_MODEL.file), TOWER_FOOTPRINT, height, STATE_COLORS[tower.state]);
         // Tint the real model by state so the blueprint stays readable.
         body.traverse((node) => { if (node.isMesh) { node.material = node.material.clone(); node.material.color = new THREE.Color(STATE_COLORS[tower.state]).lerp(new THREE.Color('#ffffff'), 0.35); } });
         body.position.set(block.x + dx, 0.2, block.z + dz);
@@ -203,6 +206,7 @@ new ResizeObserver(resize).observe(stage);
 const [sample] = await Promise.all([
   fetch('../checker/samples/check-city.json').then((response) => response.json()),
   ...[TOWER_MODEL, ...LANDMARKS].map(async (spec) => models.set(spec.file, await loadModel(spec.file))),
+  ...TOWER_FILES.map(async (file) => models.set(file, await loadModel(file))),
 ]);
 check = sample;
 document.querySelector('#source').textContent = `${check.label} · ${check.accounts.length} sites (demo fixture)`;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X } from './city-layout.js';
+import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellZ } from './city-layout.js';
 import { scatterSlotOrder, freshPlacementSeed, seededRandom as placementRandomGenerator } from './city-scatter.js';
 import { checkAccount, checkSignedIn } from './checker/checker.js';
 import { buildMissions, readProgress, saveProgress, serviceUrl } from './mission-board.js';
@@ -21,7 +21,7 @@ const accounts = [
 ];
 
 const meters = value => value * UNITS_PER_METER;
-const ACCOUNT_FOOTPRINT = 4.5;
+const ACCOUNT_FOOTPRINT = 3.4; // plots are 4.5 wide; the rest is sidewalk for lamps, hedges and benches
 const statusText = { clear: 'No known match in this source', breached: 'Known breach match', unknown: 'Check unavailable' };
 const statusColors = { clear: 0x83bc9b, breached: 0xe58268, unknown: 0xd2b56b };
 const sceneHost = document.querySelector('#city-scene');
@@ -149,6 +149,31 @@ function addPlacedModel(source, position, scale = 1, rotationY = 0) {
   return root;
 }
 
+// Many copies of one model for a few draw calls: one InstancedMesh per piece of the model, one instance per placement
+// [x, y, z, rotationY]. The model is prepared once like addPlacedModel (stood up, scaled, bottom-centered at the origin).
+function instanceModel(source, scale, placements, group) {
+  if (!source || !placements.length) return [];
+  const template = addPlacedModel(source, [0, 0, 0], scale, 0);
+  scene.remove(template);
+  template.updateMatrixWorld(true);
+  const place = new THREE.Matrix4();
+  const made = [];
+  template.traverse((mesh) => {
+    if (!mesh.isMesh) return;
+    const instanced = new THREE.InstancedMesh(mesh.geometry, mesh.material, placements.length);
+    placements.forEach(([x, y, z, rotation = 0], i) => {
+      place.makeRotationY(rotation).setPosition(x, y, z);
+      instanced.setMatrixAt(i, place.clone().multiply(mesh.matrixWorld));
+    });
+    instanced.castShadow = true;
+    instanced.receiveShadow = true;
+    instanced.computeBoundingSphere();
+    group.add(instanced);
+    made.push(instanced);
+  });
+  return made;
+}
+
 function removeProceduralParkTrees(environment) {
   const trees = [];
   environment.traverse((node) => {
@@ -208,27 +233,128 @@ function seededRandom(seed) {
 
 // A walled park on the square (cx, cz) ± half: optional lawn, a 1 m wall with gaps, trees of mixed sizes and bushes.
 // paths: keep a cross of paths clear through the middle and open the wall where they meet it (the main park's layout).
-function addPark(cx, cz, half, { seed = 1, lawn = true, paths = false, trees = 2, bushes = 4, bigTrees = 0 } = {}) {
+// A walled park on the rectangle (cx, cz) ± [halfX, halfZ] (a number means a square): optional lawn, Tai's 1 m park wall
+// all the way round with gaps for the entrances, trees of mixed sizes and bushes.
+// paths: keep a cross of paths clear through the middle and open the wall where they meet it.
+function addPark(cx, cz, half, { seed = 1, lawn = true, paths = false, trees = 2, bushes = 4, bigTrees = 0, patches = 0, clearing = null } = {}) {
   const roots = [];
   if (!parkKit) return roots;
+  const [halfX, halfZ] = Array.isArray(half) ? half : [half, half];
   const random = seededRandom(seed);
   const between = (low, high) => low + random() * (high - low);
   if (lawn) {
-    const grass = new THREE.Mesh(new THREE.BoxGeometry(half * 2, 0.04, half * 2), new THREE.MeshStandardMaterial({ color: '#3d5a3e', roughness: 0.95 }));
+    const grass = new THREE.Mesh(new THREE.BoxGeometry(halfX * 2, 0.04, halfZ * 2), new THREE.MeshStandardMaterial({ color: '#3d5a3e', roughness: 0.95 }));
     grass.position.set(cx, 0.25, cz);
     grass.receiveShadow = true;
     scene.add(grass);
     roots.push(grass);
   }
-  const inset = half - 0.12;
+  const [insetX, insetZ] = [halfX - 0.12, halfZ - 0.12];
   const gap = paths ? 1.1 : 0.55;
+  if (parkKit.wall) {
+    const wallScale = scaleForHeight(parkKit.wall, 1);
+    const run = (x1, z1, x2, z2) => {
+      const length = Math.hypot(x2 - x1, z2 - z1);
+      if (length < 0.15) return;
+      roots.push(addPlacedModel(parkKit.wall, [(x1 + x2) / 2, 0.27, (z1 + z2) / 2], [length / 2, wallScale, wallScale], x1 === x2 ? Math.PI / 2 : 0));
+    };
+    // One side of the wall; `open` leaves a gap in the middle for an entrance.
+    const side = (fixed, alongX, open) => {
+      const reach = alongX ? insetX : insetZ;
+      const point = (t) => (alongX ? [cx + t, cz + fixed] : [cx + fixed, cz + t]);
+      if (open) { run(...point(-reach), ...point(-gap / 2)); run(...point(gap / 2), ...point(reach)); }
+      else run(...point(-reach), ...point(reach));
+    };
+    side(insetZ, true, true); // the camera side always has an entrance
+    side(-insetZ, true, paths);
+    side(insetX, false, paths);
+    side(-insetX, false, paths);
+    if (parkKit.pillar) {
+      const pillarScale = scaleForHeight(parkKit.pillar, 1.2);
+      const posts = [[-insetX, -insetZ], [insetX, -insetZ], [-insetX, insetZ], [insetX, insetZ], [-gap / 2, insetZ], [gap / 2, insetZ]];
+      if (paths) posts.push([-gap / 2, -insetZ], [gap / 2, -insetZ], [insetX, -gap / 2], [insetX, gap / 2], [-insetX, -gap / 2], [-insetX, gap / 2]);
+      posts.forEach(([dx, dz]) => roots.push(addPlacedModel(parkKit.pillar, [cx + dx, 0.27, cz + dz], pillarScale)));
+    }
+  }
+  // Winding gravel paths instead of a straight strip: from each wall entrance (the middle of every side when `paths`),
+  // meandering through a couple of random bends to the middle, or to a loop around the clearing when there is one.
+  // Drawn as one instanced mesh of short gravel segments with round joints.
+  const pathPoints = [];
+  if (paths) {
+    const curves = [];
+    // The loop hugs the clearing but always stays well inside the wall.
+    const loopRadius = clearing ? [Math.min(clearing[0] / 2 + 0.9, insetX - 1.3), Math.min(clearing[1] / 2 + 0.9, insetZ - 1.3)] : null;
+    const hub = (angle) => (loopRadius ? new THREE.Vector3(Math.cos(angle) * loopRadius[0], 0, Math.sin(angle) * loopRadius[1]) : new THREE.Vector3(0, 0, 0));
+    const entrances = [[-insetX, 0, Math.PI], [insetX, 0, 0], [0, -insetZ, -Math.PI / 2], [0, insetZ, Math.PI / 2]];
+    for (const [ex, ez, angle] of entrances) {
+      const start = new THREE.Vector3(ex, 0, ez);
+      const end = hub(angle);
+      const bends = [0.35, 0.7].map((t) => {
+        const p = start.clone().lerp(end, t);
+        const sway = (random() - 0.5) * Math.min(insetX, insetZ) * 0.35; // sideways wiggle, scaled to the park
+        return ez === 0 ? p.add(new THREE.Vector3(0, 0, sway)) : p.add(new THREE.Vector3(sway, 0, 0));
+      });
+      curves.push(new THREE.CatmullRomCurve3([start, ...bends, end]));
+    }
+    if (loopRadius) {
+      const loop = Array.from({ length: 12 }, (_, i) => hub((i / 12) * Math.PI * 2));
+      curves.push(new THREE.CatmullRomCurve3(loop, true));
+    }
+    const segments = [];
+    for (const curve of curves) {
+      const points = curve.getSpacedPoints(Math.max(12, Math.ceil(curve.getLength() / 0.5)));
+      pathPoints.push(...points);
+      for (let i = 0; i < points.length - 1; i++) segments.push([points[i], points[i + 1]]);
+    }
+    const gravel = new THREE.MeshStandardMaterial({ color: '#9c9581', roughness: 1 });
+    const pieces = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), gravel, segments.length + pathPoints.length);
+    const matrix = new THREE.Matrix4();
+    const turn = new THREE.Quaternion();
+    let n = 0;
+    for (const [p, q] of segments) {
+      const length = p.distanceTo(q) + 0.05;
+      turn.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -Math.atan2(q.z - p.z, q.x - p.x));
+      matrix.compose(new THREE.Vector3(cx + (p.x + q.x) / 2, 0.29, cz + (p.z + q.z) / 2), turn, new THREE.Vector3(length, 0.03, 0.9));
+      pieces.setMatrixAt(n++, matrix);
+    }
+    for (const p of pathPoints) { // round-ish joints: a turned square at each point
+      turn.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI / 4);
+      matrix.compose(new THREE.Vector3(cx + p.x, 0.289, cz + p.z), turn, new THREE.Vector3(0.64, 0.03, 0.64));
+      pieces.setMatrixAt(n++, matrix);
+    }
+    pieces.receiveShadow = true;
+    pieces.computeBoundingSphere();
+    scene.add(pieces);
+    roots.push(pieces);
+  }
+  const onPath = (x, z, clearance) => pathPoints.some((p) => Math.hypot(p.x - x, p.z - z) < clearance);
+
+  // Patches of different greens and a few flower beds break up the lawn, off the paths.
+  const greens = ['#355c3b', '#3f6a45', '#4d7a4f', '#5a8a52', '#2f5236'];
+  const flowers = ['#7a4a6a', '#8a7a3c'];
+  for (let i = 0; i < patches; i++) {
+    const w = between(0.8, 2.8);
+    const d = between(0.8, 2.4);
+    const px = between(-insetX + w / 2 + 0.3, insetX - w / 2 - 0.3);
+    const pz = between(-insetZ + d / 2 + 0.3, insetZ - d / 2 - 0.3);
+    if (onPath(px, pz, Math.max(w, d) / 2 + 0.5)) continue;
+    if (clearing && Math.abs(px) < (clearing[0] + w) / 2 && Math.abs(pz) < (clearing[1] + d) / 2) continue;
+    const color = i % 5 === 4 ? flowers[i % 2] : greens[Math.floor(random() * greens.length)];
+    const patch = new THREE.Mesh(new THREE.BoxGeometry(w, 0.03, d), new THREE.MeshStandardMaterial({ color, roughness: 1 }));
+    patch.position.set(cx + px, 0.285 + random() * 0.01, cz + pz);
+    patch.receiveShadow = true;
+    scene.add(patch);
+    roots.push(patch);
+  }
+  // Trees and bushes go on free spots inside the wall, off the paths, not on top of each other.
   const taken = [];
   const spot = (margin, spacing) => {
     for (let attempt = 0; attempt < 40; attempt++) {
-      const dx = between(-inset + margin, inset - margin);
-      const dz = between(-inset + margin, inset - margin);
-      if (paths && (Math.abs(dx) < 0.55 || Math.abs(dz) < 0.55)) continue;
-      if (Math.abs(dx) < gap / 2 + 0.2 && dz > inset - 0.6) continue; // keep the entrance clear
+      const dx = between(-insetX + margin, insetX - margin);
+      const dz = between(-insetZ + margin, insetZ - margin);
+      if (onPath(dx, dz, 0.7 + spacing * 0.5)) continue;
+      if (Math.abs(dx) < gap / 2 + 0.2 && dz > insetZ - 0.6) continue; // keep the entrance clear
+      if (clearing && Math.abs(dx) < clearing[0] / 2 && Math.abs(dz) < clearing[1] / 2) continue; // kept open (e.g. a future building)
       if (taken.some(([x, z, r]) => Math.hypot(x - dx, z - dz) < r + spacing)) continue;
       taken.push([dx, dz, spacing]);
       return [cx + dx, cz + dz];
@@ -240,11 +366,12 @@ function addPark(cx, cz, half, { seed = 1, lawn = true, paths = false, trees = 2
     const at = spot(margin, spacing);
     if (at) roots.push(addPlacedModel(source, [at[0], 0.27, at[1]], scaleForHeight(source, height), between(0, Math.PI * 2)));
   };
-  for (let i = 0; i < bigTrees; i++) place(parkKit.largeTree, between(7, 9.5), 0.9, 0.9);
-  for (let i = 0; i < trees; i++) place(parkKit.streetTree, between(3, 6.5), 0.35, 0.55);
+  // Mixed sizes: saplings to old oaks, low shrubs to tall bushes.
+  for (let i = 0; i < bigTrees; i++) place(parkKit.largeTree, between(6, 11.5), 0.9, 0.8);
+  for (let i = 0; i < trees; i++) place(parkKit.streetTree, between(2.2, 7.5), 0.35, 0.45);
   for (let i = 0; i < bushes; i++) {
-    const [model, height] = [[parkKit.compact, between(0.7, 1.1)], [parkKit.hedge, between(0.8, 1.1)], [parkKit.tall, between(1.3, 1.9)]][Math.floor(random() * 3)];
-    place(model, height, 0.25, 0.3);
+    const [model, height] = [[parkKit.compact, between(0.45, 1.3)], [parkKit.hedge, between(0.6, 1.3)], [parkKit.tall, between(1.1, 2.4)]][Math.floor(random() * 3)];
+    place(model, height, 0.2, 0.22);
   }
   return roots;
 }
@@ -252,15 +379,52 @@ function addPark(cx, cz, half, { seed = 1, lawn = true, paths = false, trees = 2
 // Every account plot without a website building is a park: a block with all four plots free becomes one bigger park
 // with paths, otherwise each free plot gets its own small walled park. Re-run whenever the accounts change.
 const plotParkRoots = [];
+// Empty plots get non-clickable filler: favelas (Daniel's four variants) in Bristol Township, the islands and the slum
+// districts along the river inlets, and Daniel's level-1/level-2 account buildings everywhere else. Instanced, with a
+// random variant and quarter-turn fixed per plot and random window lights. Garden blocks are walled parks.
+// Re-run whenever accounts change.
+const SLUMS = new Set(['West Harlow', 'Chinatown', 'Reatton']);
+const ESTATE_CLEARING = [12, 12]; // open lawn at the centre of Wayne Estate, kept for the Wayne Manor model
+const FAVELA_ISLANDS = new Set(['Bristol Township', 'South Channel Island', 'South Hinkley']);
+const isFavelaPlot = (slot) => FAVELA_ISLANDS.has(blocks[slot.block].island) || SLUMS.has(blocks[slot.block].district);
+let favelaModels = [];
+let favelaGroup = null;
 function syncPlotParks() {
-  city.sync(slotOccupants);
-  plotParkRoots.splice(0).forEach(root => root.parent?.remove(root));
-  if (!parkKit) return;
+  // Atharva's createCity draws a lawn square on every empty plot; filler buildings take those plots now.
+  city.sync(new Map(slots.map((_, i) => [i, true])));
+  plotParkRoots.splice(0).forEach((root) => root.parent?.remove(root));
+  if (favelaGroup) { favelaGroup.traverse((node) => node.isInstancedMesh && node.dispose()); scene.remove(favelaGroup); }
+  favelaGroup = new THREE.Group();
+  favelaGroup.name = 'Filler buildings';
+  scene.add(favelaGroup);
+  const lowRise = (loadedBuildingModels?.towers ?? []).slice(0, 2).filter(Boolean);
+  const kinds = [...favelaModels.map((model) => ({ model, favela: true, plots: [] })), ...lowRise.map((model) => ({ model, favela: false, plots: [] }))];
   slots.forEach((slot, i) => {
-    if (!slotOccupants.has(i) && i % 9 === 0) plotParkRoots.push(...addPark(slot.x, slot.z, 2.25, { seed: i + 1, trees: 2, bushes: 4 }));
+    if (slotOccupants.has(i)) return;
+    const random = seededRandom(i * 7919 + 13);
+    const choices = kinds.filter((kind) => kind.favela === isFavelaPlot(slot));
+    const pool = choices.length ? choices : kinds; // until Daniel's towers load, favelas stand in everywhere
+    if (!pool.length) return;
+    pool[Math.floor(random() * pool.length)].plots.push([slot.x, 0.23, slot.z, Math.floor(random() * 4) * Math.PI / 2]);
   });
-  blocks.filter(b => b.format === 'garden').forEach((b, i) => {
-    for (const dx of [-6, 0, 6]) plotParkRoots.push(...addPark(b.x + dx, b.z, 2.8, { seed: 500 + i * 7 + dx, lawn: false, paths: true, trees: 3, bigTrees: 1, bushes: 4 }));
+  kinds.forEach(({ model, plots }) => {
+    const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
+    instanceModel(model, ACCOUNT_FOOTPRINT / Math.max(size.x, size.z), plots, favelaGroup); // fits the plot, keeps its shape
+  });
+  flickerWindows(favelaGroup);
+  if (!parkKit) return;
+  // Plazas (Founders Square): a walled green with the fountain and its benches left in a clearing.
+  blocks.filter((b) => b.format === 'plaza').forEach((b, i) => {
+    plotParkRoots.push(...addPark(b.x, b.z, [b.width / 2 - 0.1, b.depth / 2 - 0.1], { seed: 800 + i * 5, lawn: false, paths: true, trees: 7, bigTrees: 1, bushes: 18, patches: 6, clearing: [3.4, 3.4] }));
+  });
+  blocks.filter((b) => b.format === 'garden').forEach((b, i) => {
+    const area = Math.min(3.5, (b.width * b.depth) / (21 * 9)); // planting scales with size (a 2-cell park is 1), capped to stay fast
+    const estate = b.district === 'Wayne Estate';
+    plotParkRoots.push(...addPark(b.x, b.z, [b.width / 2 - 0.1, b.depth / 2 - 0.1], {
+      seed: 500 + i * 7, lawn: false, paths: true,
+      trees: Math.round(16 * area), bigTrees: Math.round(5 * area), bushes: Math.round(40 * area), patches: Math.round(14 * area),
+      clearing: estate ? ESTATE_CLEARING : null,
+    }));
   });
 }
 
@@ -287,20 +451,48 @@ async function addCityProps(environment) {
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
     mesh.position.set(x, y, z); mesh.castShadow = true; mesh.receiveShadow = true; furniture.add(mesh);
   }
+  // Street furniture stands on each block's sidewalk strip (the 0.55 units between the plots and the curb), never in the
+  // road: a lamp per side with its arm over the road, hedges, a bench and bin, hydrants and corner stoplights.
+  // Garden blocks get their park wall instead. Everything repeated is instanced.
+  const hedge = piece(props.gotham_bushes, 'Gotham_Bush_Hedge');
+  const compact = piece(props.gotham_bushes, 'Gotham_Bush_Compact');
+  const lamps = [], hedges = [], bushes = [], hydrants = [], signals = [];
   blocks.forEach((b, i) => {
+    if (b.format === 'garden' || b.format === 'plaza') return;
+    if (b.format === 'avenue') {
+      const alongX = b.avenue === 'x';
+      for (const t of [-3, 3]) for (const side of [-1, 1]) {
+        // Lamps on both kerbs of the avenue, arms over the road.
+        lamps.push(alongX ? [b.x + t, .23, b.z + side * 2.0, side > 0 ? Math.PI / 2 : -Math.PI / 2] : [b.x + side * 2.0, .23, b.z + t, side > 0 ? Math.PI : 0]);
+      }
+      return;
+    }
     const x = b.x, z = b.z;
-    const curb = 5.05;
-    placeMany('gotham_lamppost', 4.5, [[x - curb, z - 3, 0], [x + curb, z + 3, Math.PI]], .08);
-    if (i % 3 === 0) placeMany('gotham_fire_hydrant', .8, [[x + curb, z - 3.6]], .08);
-    if (i % 4 === 0) placeMany('gotham_stoplight', 4, [[x - curb, z + curb, 0]], .08);
+    const hw = b.width / 2, hd = b.depth / 2;
+    const ex = hw - 0.24, ez = hd - 0.24; // sidewalk centerline
+    // Lamp arms point at the road: +x side 0, -x side π, +z side -π/2, -z side π/2.
+    lamps.push([x + ex, .23, z - hd * 0.45, 0], [x - ex, .23, z + hd * 0.45, Math.PI], [x + hw * 0.45, .23, z + ez, -Math.PI / 2], [x - hw * 0.45, .23, z - ez, Math.PI / 2]);
+    hedges.push([x - hw * 0.2, .23, z + ez, 0], [x + hw * 0.2, .23, z - ez, 0], [x + ex, .23, z + hd * 0.2, Math.PI / 2], [x - ex, .23, z - hd * 0.2, Math.PI / 2]);
+    bushes.push([x + hw * 0.75, .23, z + ez, 0], [x - hw * 0.75, .23, z - ez, 0]);
+    if (i % 3 === 0) hydrants.push([x + ex, .23, z + hd * 0.75, 0]);
+    if (i % 4 === 0) signals.push([x - ex, .23, z + ez, 0]);
     if (i % 2 !== 0) return;
-    // Bins and benches stay on the road-side sidewalk, clear of building footprints.
-    part(x + 2.5, .36, z + curb, .42, .56, .42, metal);
-    part(x + 2.5, .66, z + curb, .47, .08, .47, metal);
-    part(x - 1, .42, z + curb, 1.5, .12, .48, wood);
-    part(x - 1, .7, z + curb + .19, 1.5, .48, .09, wood);
-    for (const dx of [-.55, .55]) part(x - 1 + dx, .24, z + curb, .1, .3, .4, metal);
-  });  parkKit = {
+    // Bench and bin on the +z sidewalk.
+    const sz = z + ez;
+    part(x + hw * 0.55, .36 + .23, sz, .3, .45, .3, metal);
+    part(x - hw * 0.55, .32 + .23, sz, 1.1, .1, .34, wood);
+    part(x - hw * 0.55, .52 + .23, sz + .13, 1.1, .34, .07, wood);
+    for (const dx of [-.4, .4]) part(x - hw * 0.55 + dx, .18 + .23, sz, .08, .24, .3, metal);
+  });
+  if (props.gotham_lamppost) instanceModel(props.gotham_lamppost, scaleForHeight(props.gotham_lamppost, 4.5), lamps, furniture);
+  if (hedge) instanceModel(hedge, scaleForHeight(hedge, 0.9), hedges, furniture);
+  if (compact) instanceModel(compact, scaleForHeight(compact, 0.8), bushes, furniture);
+  if (props.gotham_fire_hydrant) instanceModel(props.gotham_fire_hydrant, scaleForHeight(props.gotham_fire_hydrant, 0.8), hydrants, furniture);
+  if (props.gotham_stoplight) instanceModel(props.gotham_stoplight, scaleForHeight(props.gotham_stoplight, 4), signals, furniture);
+  // Daniel's four favela variants fill empty plots (syncPlotParks).
+  favelaModels = (await Promise.all(['gotham_favela_8bit', 'gotham_favela_02_8bit', 'gotham_favela_03_8bit', 'gotham_favela_04_8bit']
+    .map((name) => loadModel(`./models/buildings/${name}.glb`).catch(() => null)))).filter(Boolean);
+  parkKit = {
     wall: piece(props.gotham_park_wall, 'Gotham_Park_Wall_Straight'),
     pillar: piece(props.gotham_park_wall, 'Gotham_Park_Wall_Pillar'),
     compact: piece(props.gotham_bushes, 'Gotham_Bush_Compact'),
@@ -320,8 +512,76 @@ let accountModelsReady = false;
 let loadedBuildingModels = null;
 const landmarkRoots = [];
 
+// Bristol Heights: a suburb of Daniel's account_building_01 houses on cul-de-sacs. A spine road runs north-south down the
+// block; cul-de-sacs branch east and west and end in turning circles, each fanned by three houses facing in; more houses
+// line the spine between them; a connector road meets the river bridge. Lawns, yard trees. Not clickable.
+function buildSuburbs() {
+  const house = loadedBuildingModels?.towers?.[0];
+  const group = new THREE.Group();
+  group.name = 'Bristol Heights suburb';
+  scene.add(group);
+  const asphalt = new THREE.MeshStandardMaterial({ color: '#2a2f35', roughness: 0.95 });
+  const kerb = new THREE.MeshStandardMaterial({ color: '#8f8a7a', roughness: 0.9 });
+  const road = (x, z, w, d) => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, d), asphalt);
+    mesh.position.set(x, 0.255, z);
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  };
+  const circle = (x, z, radius) => {
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(radius + 0.2, radius + 0.2, 0.04, 24), kerb);
+    ring.position.set(x, 0.25, z);
+    const bulb = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.05, 24), asphalt);
+    bulb.position.set(x, 0.26, z);
+    const island = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.35, radius * 0.35, 0.08, 16), new THREE.MeshStandardMaterial({ color: '#3f6a45' }));
+    island.position.set(x, 0.29, z);
+    [ring, bulb, island].forEach((mesh) => { mesh.receiveShadow = true; group.add(mesh); });
+  };
+  const homes = [];
+  const yards = [];
+  for (const b of blocks.filter((block) => block.format === 'suburb')) {
+    const random = seededRandom(9001 + Math.round(b.x * 7 + b.z));
+    const top = b.z - b.depth / 2;
+    road(b.x, b.z, 2, b.depth - 0.4); // spine
+    road(b.x + b.width / 4 + 0.5, cellZ(7), b.width / 2 - 1, 2); // connector to the river bridge (row 7)
+    const rows = [];
+    for (let z = top + 11; z < top + b.depth - 6; z += 11) rows.push(z);
+    for (const z of rows) {
+      for (const side of [-1, 1]) {
+        const reach = b.width / 2 - 7; // cul-de-sac stub length from the spine (fan of houses stays on the block)
+        road(b.x + side * (1 + reach / 2), z, reach, 1.6);
+        const bx = b.x + side * (1 + reach);
+        circle(bx, z, 2.2);
+        // Three houses fanned around the turning circle, fronts facing it.
+        for (const angle of [-1, 0, 1].map((k) => k * Math.PI / 3)) {
+          const dx = side * Math.cos(angle) * 4.4;
+          const dz = Math.sin(angle) * 4.4;
+          homes.push([bx + dx, 0.23, z + dz, Math.atan2(-dx, -dz)]);
+        }
+        // Yard trees behind the stub houses.
+        if (random() > 0.35) yards.push([b.x + side * (2.8 + random() * 2), z + (random() > 0.5 ? 3.4 : -3.4)]);
+      }
+    }
+    // Houses along the spine between cul-de-sacs, facing the spine.
+    for (let i = 0; i < rows.length - 1; i++) {
+      const z = (rows[i] + rows[i + 1]) / 2;
+      homes.push([b.x - 3.4, 0.23, z, Math.PI / 2], [b.x + 3.4, 0.23, z, -Math.PI / 2]);
+    }
+    for (let i = 0; i < 6; i++) yards.push([b.x + (random() - 0.5) * (b.width - 3), top + 2 + random() * 4]);
+  }
+  if (house) {
+    const size = new THREE.Box3().setFromObject(house).getSize(new THREE.Vector3());
+    instanceModel(house, 3.2 / Math.max(size.x, size.z), homes, group); // 3.2 units wide, ~7 m tall: a two-storey house
+    flickerWindows(group);
+  }
+  const tree = parkKit?.streetTree;
+  if (tree) yards.forEach(([x, z], i) => group.add(addPlacedModel(tree, [x, 0.23, z], scaleForHeight(tree, 3 + (i % 5) * 0.8), i)));
+}
+
 function finishInitialLoad() {
   if (!environmentReady || !accountModelsReady) return;
+  buildSuburbs();
+  syncPlotParks();
   syncPlotParks();
   document.querySelector('#loading-overlay').classList.add('is-hidden');
   document.querySelector('#loading-overlay small').textContent = 'Buildings and street models ready';
@@ -344,6 +604,8 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
     catch (error) { console.warn(`Could not load ${name} building:`, error); return [name, null]; }
   }));
   const models = { generic: gltf.scene, ...Object.fromEntries(variants) };
+  // Daniel's ten website towers, 01 (9.8 m) to 10 (45.3 m); one that fails to load falls back to Atharva's styles.
+  models.towers = await Promise.all(Array.from({ length: 10 }, (_, i) => loadModel(`./models/account_buildings/account_building_${String(i + 1).padStart(2, '0')}.glb`).catch(() => null)));
   models.villains = (await Promise.all(VILLAINS.map((name) => loadModel(`./models/npcs/${name}.glb`).catch((error) => { console.warn(`Could not load ${name}:`, error); return null; })))).filter(Boolean);
   loadedBuildingModels = models;
   accounts.forEach((account) => {
@@ -363,8 +625,12 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
     }
     const bounds = new THREE.Box3().setFromObject(source);
     const size = bounds.getSize(new THREE.Vector3());
-    const scale = [block.width / size.x, landmark.height / size.y, block.depth / size.z];
+    // Daniel's *_8bit landmarks are modeled in meters: true road scale, shrunk only to fit the block, never stretched.
+    const scale = landmark.file.endsWith('_8bit.glb')
+      ? Math.min(UNITS_PER_METER, (block.width - 1.2) / size.x, (block.depth - 1.2) / size.z)
+      : [(block.width - 1.2) / size.x, landmark.height / size.y, (block.depth - 1.2) / size.z];
     const root = addPlacedModel(source, [block.x, 0.23, block.z], scale);
+    flickerWindows(root);
     root.userData.landmark = landmark.name;
     const label = landmarkLabel(landmark.name); label.position.set(block.x, 0.23 + landmark.height + 0.8, block.z); scene.add(label);
     landmarkRoots.push(root);
@@ -379,8 +645,18 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
   finishInitialLoad();
 });
 
+// Older account = taller tower: one of Daniel's ten towers per 1.5 years since the site's first email
+// (under 1.5 years: 01, 13.5+ years: 10). No first-seen date: 02.
+function towerVariant(account, now = Date.now()) {
+  const seen = Date.parse(account.firstSeen);
+  if (Number.isNaN(seen)) return 1;
+  return Math.max(0, Math.min(9, Math.floor((now - seen) / (365.25 * 864e5) / 1.5)));
+}
+
 function chooseBuildingModel(account, models) {
-  // Keep each account's architecture stable across reloads and shuffled placements.
+  const tower = models.towers?.[towerVariant(account)];
+  if (tower) return tower;
+  // Fallback: keep each account's architecture stable across reloads and shuffled placements.
   const styles = ['generic', 'wayne', 'ace', 'arkham'].filter(key => models[key]);
   if (!styles.length) return null;
   const hash = [...account.id].reduce((value, char) => Math.imul(value ^ char.charCodeAt(0), 16777619), 2166136261) >>> 0;
@@ -404,7 +680,9 @@ function addAccountBuilding(account, source, scale = 2) {
   const age = account.firstSeen ? Math.max(0, (Date.now() - Date.parse(account.firstSeen)) / 31557600000) : 3;
   const isWayne = source === loadedBuildingModels?.wayne;
   // The updated Wayne asset is twice the original tower's height.
-  const targetHeight = FLOOR * (2 + Math.min(5, Math.floor(age / 3))) * (isWayne ? 2 : 1);
+  // Daniel's towers are modeled in meters, so they keep their real height at road scale.
+  const isDanielTower = loadedBuildingModels?.towers?.includes(source);
+  const targetHeight = isDanielTower ? raw.y * UNITS_PER_METER : FLOOR * (2 + Math.min(5, Math.floor(age / 3))) * (isWayne ? 2 : 1);
   const footprint = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
   const footprintScale = ACCOUNT_FOOTPRINT / Math.max(footprint.x, footprint.z);
   model.scale.set(footprintScale, targetHeight / raw.y, footprintScale);
@@ -412,6 +690,7 @@ function addAccountBuilding(account, source, scale = 2) {
   root.name = `account-${account.id}`;
   root.add(model);
   cloneInstanceMaterials(root);
+  flickerWindows(root);
   const slot = slots[account.slot];
   root.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(root);
@@ -427,6 +706,70 @@ function addAccountBuilding(account, source, scale = 2) {
   slotOccupants.set(account.slot, account.id);
   syncPlotParks();
   applyBuildingState(account);
+}
+
+// Random window lights, fixed once drawn: each pane is lit or dark at random, with a different pattern per building.
+// Daniel's panes are merged into one mesh per material, so each pane is found as a connected piece of the mesh
+// (triangles sharing corners) and gets its own random seed; a small shader patch turns ~35% of panes off. Off panes keep
+// a faint glow.
+const WINDOW_MATERIAL = /window/i;
+function windowSeeds(geometry) {
+  if (geometry.attributes.windowSeed) return;
+  const position = geometry.attributes.position;
+  const parent = Int32Array.from({ length: position.count }, (_, i) => i);
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const union = (a, b) => { a = find(a); b = find(b); if (a !== b) parent[a] = b; };
+  const index = geometry.index?.array;
+  const corners = index ? index.length : position.count;
+  for (let t = 0; t < corners; t += 3) {
+    const [a, b, c] = index ? [index[t], index[t + 1], index[t + 2]] : [t, t + 1, t + 2];
+    union(a, b);
+    union(a, c);
+  }
+  const welded = new Map(); // flat-shaded boxes repeat corners per face: weld them so a whole pane is one piece
+  for (let i = 0; i < position.count; i++) {
+    const key = `${Math.round(position.getX(i) * 1000)},${Math.round(position.getY(i) * 1000)},${Math.round(position.getZ(i) * 1000)}`;
+    if (welded.has(key)) union(i, welded.get(key)); else welded.set(key, i);
+  }
+  const seedOf = new Map();
+  const seeds = new Float32Array(position.count);
+  for (let i = 0; i < position.count; i++) {
+    const piece = find(i);
+    if (!seedOf.has(piece)) {
+      const h = Math.sin(position.getX(piece) * 12.9898 + position.getY(piece) * 78.233 + position.getZ(piece) * 37.719) * 43758.5453;
+      seedOf.set(piece, h - Math.floor(h));
+    }
+    seeds[i] = seedOf.get(piece);
+  }
+  geometry.setAttribute('windowSeed', new THREE.BufferAttribute(seeds, 1));
+}
+function flickerWindows(root) {
+  const buildingSeed = Math.random();
+  root.traverse((node) => {
+    if (!node.isMesh) return;
+    const materials = Array.isArray(node.material) ? node.material : [node.material];
+    if (!materials.some((material) => WINDOW_MATERIAL.test(material.name) || node.name.startsWith('window_'))) return;
+    windowSeeds(node.geometry);
+    materials.forEach((material) => {
+      if (material.userData.flicker) return;
+      material.userData.flicker = true;
+      material.customProgramCacheKey = () => 'window-flicker';
+      material.onBeforeCompile = (shader) => {
+        shader.uniforms.buildingSeed = { value: buildingSeed };
+        shader.vertexShader = shader.vertexShader
+          .replace('void main() {', 'attribute float windowSeed;\nvarying float vWindowSeed;\nvoid main() {\n  vWindowSeed = windowSeed;\n#ifdef USE_INSTANCING\n  vWindowSeed = fract(windowSeed + dot(instanceMatrix[3].xz, vec2(0.0731, 0.1197)));\n#endif');
+        shader.fragmentShader = shader.fragmentShader
+          .replace('void main() {', `uniform float buildingSeed;
+varying float vWindowSeed;
+void main() {
+  float roll = fract(sin((vWindowSeed * 91.7 + buildingSeed * 13.1) * 12.9898) * 43758.5453);
+  float windowLit = roll > 0.35 ? 1.0 : 0.0; // about two thirds of panes lit`)
+          .replace('#include <color_fragment>', '#include <color_fragment>\n  diffuseColor.rgb *= mix(0.28, 1.0, windowLit);')
+          .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance *= mix(0.06, 1.0, windowLit);');
+      };
+      material.needsUpdate = true;
+    });
+  });
 }
 
 function cloneInstanceMaterials(root) {
@@ -490,8 +833,8 @@ function applyBuildingState(account) {
   const beacon = root.userData.statusBeacon;
   if (beacon) beacon.traverse((node) => { if (node.isMesh && node.material) { node.material.color.copy(color); if (node.material.emissive) node.material.emissive.copy(color); } });
   root.traverse((node) => {
-    if (!node.isMesh || !node.name.startsWith('window_') || !node.material) return;
-    const materials = Array.isArray(node.material) ? node.material : [node.material];
+    if (!node.isMesh || !node.material) return;
+    const materials = (Array.isArray(node.material) ? node.material : [node.material]).filter((material) => node.name.startsWith('window_') || material.name.startsWith('MAT_Window'));
     materials.forEach((windowMaterial) => {
       if (account.status === 'clear') {
         windowMaterial.emissive?.set('#9a7651');
@@ -659,13 +1002,20 @@ function openPhone({ eyebrow, title, subtitle, cards, counts = null, listTitle, 
     });
   }
   const list = document.querySelector('#city-stats-list');
-  list.replaceChildren(...rows.map(([name, detail, badge, kind]) => {
+  list.replaceChildren(...rows.map(([name, detail, badge, kind, href]) => {
     const row = document.createElement('li');
     row.className = `city-stats-row status-${kind}`;
     const identity = document.createElement('span');
     identity.className = 'city-stats-identity';
     const strong = document.createElement('strong');
-    strong.textContent = name;
+    if (href) {
+      const link = document.createElement('a');
+      link.href = href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = `${name} \u2197`;
+      strong.append(link);
+    } else strong.textContent = name;
     const small = document.createElement('small');
     small.textContent = detail;
     identity.append(strong, small);
@@ -815,8 +1165,74 @@ function showMissionBoard({ focus = true } = {}) {
 }
 
 // Fixed landmarks report on the whole ward.
+const landmarkBlock = (name) => blocks[landmarks.find((landmark) => landmark.name === name)?.block ?? 0];
 const landmarkReports = {
   gcpd: () => showMissionBoard(),
+  // Gotham Bank: every account, by when it was opened.
+  bank: () => {
+    const dated = accounts.filter((account) => account.firstSeen).sort((a, b) => a.firstSeen.localeCompare(b.firstSeen));
+    const years = (account) => ((Date.now() - Date.parse(account.firstSeen)) / (365.25 * 864e5)).toFixed(0);
+    openPhone({
+      eyebrow: 'GOTHAM BANK · ACCOUNT VAULT',
+      title: 'All accounts',
+      subtitle: 'When each account was opened (first email from the site)',
+      cards: [['SITES', accounts.length, 'total'], ['OLDEST', dated[0]?.firstSeen.slice(0, 4) ?? '—', 'total']],
+      listTitle: 'OLDEST FIRST',
+      rows: [...dated, ...accounts.filter((account) => !account.firstSeen)].map((account) => [account.name, account.firstSeen ? `since ${account.firstSeen}` : 'opening date unknown', account.firstSeen ? `${years(account)} YRS` : '—', account.status]),
+      note: 'Older accounts are taller towers. Close the ones you no longer use.',
+      focus: landmarkBlock('Gotham Bank'),
+      mood: 'normal',
+    });
+  },
+  // Cobblepot Manor: breach news from the checker, or its offline sample. The news is Have I Been Pwned's breach
+  // catalog, so each headline opens that breach's HIBP page.
+  cobblepot: async () => {
+    let news = null;
+    try { news = await (await fetch(`${CHECKER_API}/api/news?limit=8`)).json(); }
+    catch { news = await (await fetch('./checker/samples/news.json')).json().catch(() => null); }
+    const recent = news?.recent ?? [];
+    openPhone({
+      eyebrow: 'COBBLEPOT MANOR · BREACH NEWS',
+      title: 'Latest breaches',
+      subtitle: news?.source ?? 'Breach news unavailable',
+      cards: [['NEW BREACHES', recent.length, recent.length ? 'breached' : 'total'], ['THIS YEAR', news?.thisYear?.breaches ?? '—', 'total']],
+      listTitle: 'RECENT',
+      rows: recent.map((item) => [item.name, `${item.date} · ${Number(item.records || 0).toLocaleString()} records · ${item.industry || 'industry unknown'}`, 'NEWS', 'unknown', `https://haveibeenpwned.com/Breach/${encodeURIComponent(item.name)}`]),
+      note: 'News about any service, not only yours. Tap a headline for the full story.',
+      focus: landmarkBlock('Cobblepot Manor'),
+      mood: 'normal',
+    });
+  },
+  // Blackgate Penitentiary: old breaches, locked away after the 12-month window.
+  blackgate: () => {
+    const locked = accounts.flatMap((account) => (account.historical ?? []).map((breach) => [account.name, `${breach.name} · ${breach.date || 'date unknown'}`, 'HISTORICAL', 'historical']));
+    openPhone({
+      eyebrow: 'BLACKGATE · LOCKED AWAY',
+      title: 'Historical breaches',
+      subtitle: `Breaches older than ${RECENT_BREACH_MONTHS} months`,
+      cards: [['LOCKED UP', locked.length, 'total']],
+      listTitle: 'SERVED THEIR TIME',
+      rows: locked,
+      note: 'Old breaches still count: change those passwords if you never did.',
+      focus: landmarkBlock('Blackgate Penitentiary'),
+      mood: locked.length ? 'wary' : 'happy',
+    });
+  },
+  // Elliot Memorial: sites the check couldn't reach.
+  elliot: () => {
+    const unknown = accounts.filter((account) => account.status === 'unknown');
+    openPhone({
+      eyebrow: 'ELLIOT MEMORIAL · NEEDS A RECHECK',
+      title: "Couldn't check",
+      subtitle: 'Unknown is not clear',
+      cards: [['UNCHECKED', unknown.length, unknown.length ? 'unknown' : 'clear']],
+      listTitle: 'IN RECOVERY',
+      rows: unknown.map((account) => [account.name, account.error || 'The source did not answer.', 'UNKNOWN', 'unknown']),
+      note: 'Run the check again later.',
+      focus: landmarkBlock('Elliot Memorial'),
+      mood: unknown.length ? 'unsure' : 'happy',
+    });
+  },
   wayne: () => openPhone({
     eyebrow: 'WAYNE TOWER · ACCOUNT MONITOR',
     title: 'Account overview',
@@ -1025,15 +1441,45 @@ async function submitCheck(event) {
   } catch (problem) { error.textContent = problem.message || 'Check unavailable.'; }
 }
 
+// Website towers cluster around the landmarks, like districts around a centrepiece: plots are dealt round-robin from each
+// city landmark's nearest plots, Wayne Tower first. Bristol and South Hinkley landmarks don't draw towers out of town.
+function landmarkSlotOrder() {
+  const queues = landmarks
+    .filter((landmark) => !['Bristol Township', 'South Hinkley'].includes(blocks[landmark.block].island))
+    .map((landmark) => {
+      const centre = blocks[landmark.block];
+      return slots.map((slot, i) => [i, Math.hypot(slot.x - centre.x, slot.z - centre.z)]).sort((a, b) => a[1] - b[1]).map(([i]) => i);
+    });
+  const taken = new Set();
+  const order = [];
+  for (let added = true; added;) {
+    added = false;
+    for (const queue of queues) {
+      while (queue.length && taken.has(queue[0])) queue.shift();
+      if (!queue.length) continue;
+      const slot = queue.shift();
+      taken.add(slot);
+      order.push(slot);
+      added = true;
+    }
+  }
+  const outOfTown = (i) => blocks[slots[i].block].island === 'Bristol Township'; // Bristol stays all favelas
+  return [...order, ...slots.map((_, i) => i).filter((i) => !taken.has(i))].filter((i) => !outOfTown(i));
+}
+
 function installCheck(result) {
   if (!document.querySelector('#city-stats').hidden) closeCityStats();
   currentCheck = result;
   const stamp = result.checkedAt ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(result.checkedAt)) : null;
   const entries = result.accounts.length ? result.accounts : [{ name: result.label, domain: '', breached: false, breaches: [], foundIn: [], firstSeen: null }];
-  placementOrder = scatterSlotOrder(freshPlacementSeed());
-  const citySlots = placementOrder;
+  placementOrder = landmarkSlotOrder();
+  // Taller towers go behind shorter ones: take the plots the scatter picked, then give the oldest (tallest) sites the plots
+  // furthest from the camera (smallest x + z) and the newest the ones in front.
+  const picked = placementOrder.slice(0, entries.length).sort((a, b) => slots[a].x + slots[a].z - (slots[b].x + slots[b].z));
+  const byAge = entries.map((entry, index) => ({ index, seen: Date.parse(entry.firstSeen) || Infinity })).sort((a, b) => a.seen - b.seen);
+  const plotFor = new Map(byAge.map(({ index }, rank) => [index, picked[rank]]));
   const next = entries.map((entry, index) => {
-    const citySlot = citySlots[index] ?? -1;
+    const citySlot = plotFor.get(index) ?? -1;
     const related = (result.breaches || []).filter((breach) => entry.breaches?.includes(breach.name));
     return { id: `${result.id}-${index}`, name: entry.name, domain: entry.domain, label: result.label, district: citySlot >= 0 ? slots[citySlot].district : 'Beyond city plots', status: result.status === 'unknown' && !entry.domain ? 'unknown' : entry.breached ? 'breached' : 'clear', slot: citySlot, checkedAt: stamp, source: result.source, breaches: related.length ? related : (entry.breaches || []).map((name) => ({ name, date: 'Date unavailable', exposedData: [] })), foundIn: entry.foundIn || [], firstSeen: entry.firstSeen, error: result.error };
   });
@@ -1202,15 +1648,16 @@ renderer.domElement.addEventListener('pointerup', (event) => {
   pointer.set(((event.clientX - bounds.left) / bounds.width) * 2 - 1, -((event.clientY - bounds.top) / bounds.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
   const hit = raycaster.intersectObjects([...renderedBuildings.values(), ...landmarkRoots], true)[0];
-  if (!hit) return;
-  let node = hit.object;
+  let node = hit?.object;
   while (node && !node.userData.accountId && !node.userData.landmark) node = node.parent;
+  // With the phone open, a building switches the report; anything else (street, park, sea) closes it.
+  if (!node && !document.querySelector('#city-stats').hidden) closeCityStats();
   if (node?.userData.accountId) {
     selectAccount(node.userData.accountId);
     showAccountReport(node.userData.accountId);
   } else if (node?.userData.landmark) {
     const name = node.userData.landmark;
-    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham', 'GCPD Headquarters': 'gcpd' }[name];
+    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham', 'Gotham Bank': 'bank', 'GCPD Headquarters': 'gcpd', 'Cobblepot Manor': 'cobblepot', 'Blackgate Penitentiary': 'blackgate', 'Elliot Memorial': 'elliot' }[name];
     if (key) landmarkReports[key]();
     else openPhone({ eyebrow: name.toUpperCase(), title: name, subtitle: 'City-wide account overview', cards: [['ACCOUNTS MONITORED', accounts.length, 'total']], counts: countStatuses(accounts), listTitle: 'ACCOUNT STATUS', rows: accounts.map(a => [a.name, a.district, accountBadge(a), a.status]), note: 'Landmark model pending. No match means no known match in this source.', focus: landmarks.find(l => l.name === name) ? blocks[landmarks.find(l => l.name === name).block] : blocks[0] });
   }

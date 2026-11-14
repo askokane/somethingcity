@@ -1,7 +1,10 @@
+import { cellX, cellZ } from './city-plan.js';
+
+// Beaches on the Gotham map's shores; each patch covers two cells of one shoreline (centered on their shared corner).
 export const beaches = [
-  { name: 'West Bay Beach', x: -51, z: 30, rotation: -Math.PI / 2, style: 'seaside' },
-  { name: 'South Strand', x: 15, z: 66, rotation: 0, style: 'strand' },
-  { name: 'North Head Cove', x: -87, z: -78, rotation: -Math.PI / 2, style: 'rocky' },
+  { name: 'Reatton Beach', x: cellX(5) + 6, z: cellZ(7) - 6, rotation: Math.PI, style: 'seaside' }, // Reatton's bulge, on the upper inlet
+  { name: 'Stevensburgh Strand', x: cellX(10) + 6, z: cellZ(14) + 6, rotation: 0, style: 'strand' }, // Downtown's south shore
+  { name: 'North Point Cove', x: cellX(10) + 6, z: cellZ(0) - 6, rotation: Math.PI, style: 'rocky' }, // Uptown's north shore
 ];
 
 export function beachPoint(beach, x, z) {

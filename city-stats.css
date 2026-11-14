@@ -392,3 +392,11 @@ button.city-stats-card span::after { content: " \203A"; color: #ffd45e; }
   .mission-card { padding: 10px; }
   .mission-card h3 { font-size: 14px; }
 }
+/* Report links (Cobblepot news headlines). */
+.city-stats-row strong a { color: #ffd45e; text-decoration: underline; text-underline-offset: 2px; }
+.city-stats-row strong a:hover, .city-stats-row strong a:focus-visible { color: #fff3b0; }
+/* The backdrop lets clicks through to the city, so clicking another building switches reports (app.js closes the phone
+   on a click that hits no building). Only the phone itself takes the pointer. */
+.city-stats-backdrop { pointer-events: none; }
+.city-stats-dialog { pointer-events: auto; }
+@media (max-width: 900px) { .bat-status { bottom: 78px; } } /* the nav bar moves to the bottom here */

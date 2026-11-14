@@ -6,7 +6,7 @@ import { isBeachEdge } from './coastal-plan.js';
 import { seededRandom } from './city-scatter.js';
 
 
-import { blocks, slots, islands, bridge, landCells, edges, FLOOR } from './city-plan.js';
+import { blocks, slots, islands, bridges, landCells, edges, landmarks, FLOOR } from './city-plan.js';
 export * from './city-plan.js';
 
 export function createCity(scene) {
@@ -24,17 +24,26 @@ export function createCity(scene) {
   const sea = createStylizedSea(islands);
   group.add(sea.root);
   const coastReady = createCoastalScene().then(coast => { group.add(coast); return coast; });
-  const bridgeReady = new GLTFLoader().loadAsync('./models/everything-else/bridge_gothic_suspension.glb').then(gltf => {
-    const root = gltf.scene;
-    root.name = 'Inter-island gothic bridge';
-    root.position.set(bridge.x, 0.06, bridge.z);
-    root.scale.set(bridge.length / 20, 1, bridge.width / 3);
-    root.traverse(node => {
-      if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; }
+  // Atharva's bridge models (20 units long along X, 3-unit road, pivot at the road centre): one per bridge in
+  // city-plan.js, stretched to its span and turned for north-south crossings.
+  const bridgeFiles = { gothic: 'bridge_gothic_suspension.glb', narrows: 'bridge_narrows_ironworks.glb', blackgate: 'bridge_blackgate_viaduct.glb' };
+  const loader = new GLTFLoader();
+  const bridgeReady = Promise.all(Object.entries(bridgeFiles).map(([style, file]) => loader.loadAsync(`./models/everything-else/${file}`).then((gltf) => [style, gltf.scene])))
+    .then((loaded) => {
+      const models = Object.fromEntries(loaded);
+      const bridgeGroup = new THREE.Group();
+      bridgeGroup.name = 'Gotham bridges';
+      for (const bridge of bridges) {
+        const root = (models[bridge.style] ?? models.gothic).clone(true);
+        root.position.set(bridge.x, 0.06, bridge.z);
+        root.scale.set(bridge.length / 20, 1, bridge.width / 3);
+        if (bridge.vertical) root.rotation.y = Math.PI / 2;
+        root.traverse((node) => { if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
+        bridgeGroup.add(root);
+      }
+      group.add(bridgeGroup);
+      return bridgeGroup;
     });
-    group.add(root);
-    return root;
-  });
   const ready = Promise.allSettled([coastReady, bridgeReady]).then(results => ({
     failures: results.flatMap((result, i) => result.status === 'rejected' ? [{ asset: ['coastal scenery', 'bridge'][i], error: result.reason }] : []),
   }));
@@ -43,32 +52,68 @@ export function createCity(scene) {
     cube(c.x, 0.03, c.z, 12, 0.08, 12, '#252d35');
   }
   for (const b of blocks) {
-    const color = b.format === 'garden' ? '#496455' : b.format === 'market' ? '#666258' : b.format === 'plaza' ? '#8a8475' : b.format === 'dockyard' ? '#64665d' : '#555c62';
+    const color = b.format === 'suburb' ? '#3c5040' : b.format === 'garden' ? '#496455' : b.format === 'market' ? '#666258' : b.format === 'plaza' ? '#496455' : b.format === 'dockyard' ? '#64665d' : '#555c62';
     cube(b.x, 0.12, b.z, b.width, 0.22, b.depth, color);
     if (b.format === 'terrace' || b.format === 'courtyard') for (const side of [-1, 1]) {
       const turned = b.format === 'terrace';
       cube(b.x + (turned ? side * 4.2 : 0), .12, b.z + (turned ? 0 : side * 4.2), turned ? .65 : 8, .22, turned ? 8 : .65, '#555c62');
     }
+    if (b.format === 'plaza') cube(b.x, 0.245, b.z, b.width - 1, 0.05, b.depth - 1.2, '#3f5a49');
     if (b.format === 'garden') {
-      cube(b.x, 0.245, b.z, b.width - 1, 0.05, 7.8, '#3f5a49');
-      cube(b.x, 0.28, b.z, b.width, 0.05, 1, '#9c9581');
+      cube(b.x, 0.245, b.z, b.width - 1, 0.05, b.depth - 1.2, '#3f5a49');
 
     }
     if (b.format === 'courtyard') cube(b.x, .25, b.z, .6, .04, 7.5, '#9c9581');
+    if (b.format === 'avenue') {
+      // The bridge's road carries straight on through the block, across both ring streets, with lane dashes.
+      const alongX = b.avenue === 'x';
+      cube(b.x, 0.235, b.z, alongX ? 12 : 3, 0.03, alongX ? 3 : 12, '#252d35');
+      for (const t of [-4.5, -1.5, 1.5, 4.5]) cube(b.x + (alongX ? t : 0), 0.255, b.z + (alongX ? 0 : t), alongX ? 1.2 : .06, .01, alongX ? .06 : 1.2, '#b1a383');
+    }
   }
+  // Which side of a shore edge is land, and which block owns that land.
+  const landAt = new Map(landCells.map((c) => [`${c.x},${c.z}`, c]));
+  const blockOf = new Map();
+  blocks.forEach((b) => b.cells.forEach((c) => blockOf.set(`${c.x},${c.z}`, b)));
+  const shoreSide = (edge) => {
+    const [a, b] = edge.vertical ? [[edge.x - 6, edge.z], [edge.x + 6, edge.z]] : [[edge.x, edge.z - 6], [edge.x, edge.z + 6]];
+    const inner = landAt.has(`${a[0]},${a[1]}`) ? a : b;
+    const outward = edge.vertical ? Math.sign(edge.x - inner[0]) : Math.sign(edge.z - inner[1]);
+    return { block: blockOf.get(`${inner[0]},${inner[1]}`), outward };
+  };
+  // Working waterfronts keep their seawall: the docks and Ace Chemicals.
+  const keepsSeawall = (block) => block?.format === 'dockyard' || landmarks.some((l) => l.name === 'Ace Chemicals' && blocks[l.block] === block);
+  // A thin sand border on the water side: a dry upper strip and a wet lower lip, overlapping at the corners.
+  const sandStrip = (edge, outward) => {
+    for (const [offset, width, top, color] of [[0.6, 1.2, 0.0, '#c9b48a'], [1.5, 0.8, -0.32, '#a8916a']]) {
+      const across = edge.vertical ? edge.x + outward * offset : edge.z + outward * offset;
+      const length = 12 + 2.6;
+      const height = top + 0.9;
+      cube(edge.vertical ? across : edge.x, top - height / 2, edge.vertical ? edge.z : across, edge.vertical ? width : length, height, edge.vertical ? length : width, color);
+    }
+  };
   for (const edge of edges) {
-    if (edge.shore && !isBeachEdge(edge)) {
-      // Open both seawalls across the full bridge approach, including its sidewalks.
-      const approach = edge.vertical && Math.abs(edge.x - bridge.x) <= bridge.length / 2 && Math.abs(edge.z - bridge.z) < 6 + bridge.width * .75;
-      const intervals = approach
-        ? [[edge.z - 6, Math.min(edge.z + 6, bridge.z - bridge.width * .75)], [Math.max(edge.z - 6, bridge.z + bridge.width * .75), edge.z + 6]]
-        : [[edge.z - 6, edge.z + 6]];
+    const side = edge.shore && !isBeachEdge(edge) ? shoreSide(edge) : null;
+    if (side && !keepsSeawall(side.block)) {
+      sandStrip(edge, side.outward);
+    } else if (edge.shore && !isBeachEdge(edge)) {
+      // Open the seawall across every bridge approach (with its sidewalks): an east-west bridge crosses vertical edges,
+      // a north-south one crosses horizontal edges.
+      const along = edge.vertical ? edge.z : edge.x;
+      const crossing = bridges.find((b) => b.vertical !== edge.vertical
+        && Math.abs(edge.vertical ? edge.x - b.x : edge.z - b.z) <= b.length / 2 + 0.01
+        && Math.abs(along - (edge.vertical ? b.z : b.x)) < 6 + b.width * .75);
+      const centre = crossing ? (edge.vertical ? crossing.z : crossing.x) : 0;
+      const halfGap = crossing ? crossing.width * .75 : 0;
+      const intervals = crossing
+        ? [[along - 6, Math.min(along + 6, centre - halfGap)], [Math.max(along - 6, centre + halfGap), along + 6]]
+        : [[along - 6, along + 6]];
       for (const [start, end] of intervals) {
         if (end <= start) continue;
-        const z = edge.vertical ? (start + end) / 2 : edge.z;
+        const mid = (start + end) / 2;
         const length = end - start;
-        cube(edge.x, -.15, z, edge.vertical ? .25 : 12, .45, edge.vertical ? length : .25, '#778c91');
-        cube(edge.x, -.47, z, edge.vertical ? .6 : 12, .025, edge.vertical ? length : .6, '#67969d');
+        cube(edge.vertical ? edge.x : mid, -.15, edge.vertical ? mid : edge.z, edge.vertical ? .25 : length, .45, edge.vertical ? length : .25, '#778c91');
+        cube(edge.vertical ? edge.x : mid, -.47, edge.vertical ? mid : edge.z, edge.vertical ? .6 : length, .025, edge.vertical ? length : .6, '#67969d');
       }
     } else if (!edge.shore) {
       for (const offset of [-4.5, -1.5, 1.5, 4.5]) cube(edge.x + (edge.vertical ? 0 : offset), .085, edge.z + (edge.vertical ? offset : 0), edge.vertical ? .06 : 1.2, .015, edge.vertical ? 1.2 : .06, '#b1a383');

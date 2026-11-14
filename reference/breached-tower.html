@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Breached Tower Reference</title>
+    <script type="importmap">
+      { "imports": {
+        "three": "../vendor/three/build/three.module.js",
+        "three/addons/": "../vendor/three/examples/jsm/"
+      } }
+    </script>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; background: #07080c; color: #f3f0d1; font: 12px/1.4 "Courier New", monospace; overflow: hidden; }
+      canvas { display: block; width: 100vw; height: 100vh; image-rendering: pixelated; }
+      .panel { position: fixed; left: 14px; top: 14px; padding: 10px 12px; border: 3px solid #000; background: #0b1220; box-shadow: 5px 5px 0 #000, inset 0 0 0 2px #ffd45e; max-width: 340px; }
+      .panel strong { color: #ffd45e; letter-spacing: .14em; }
+      .panel p { margin: 6px 0; color: #a9c2c0; }
+      .panel label { display: flex; gap: 8px; align-items: center; margin-top: 6px; }
+      .panel select, .panel input { font: inherit; }
+      .tags { position: fixed; bottom: 18px; left: 0; right: 0; display: flex; justify-content: space-around; pointer-events: none; }
+      .tags span { padding: 3px 8px; border: 2px solid #000; background: #0b1220; color: #ffd45e; letter-spacing: .12em; }
+      .tags span.breach { color: #ff7185; }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <strong>REFERENCE · BREACHED TOWER</strong>
+      <p>A look test, not the app: Daniel's tower as it is (left) and with a breach treatment (right). Drag to orbit, scroll to zoom.</p>
+      <label>Tower <select id="tower"></select></label>
+      <label>Pixel size <input id="pixels" type="range" min="1" max="4" step="1" value="3" /></label>
+    </div>
+    <div class="tags"><span>NO KNOWN BREACH</span><span class="breach">BREACHED</span></div>
+    <script type="module" src="./breached-tower.js"></script>
+  </body>
+</html>

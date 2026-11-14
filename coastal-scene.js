@@ -47,11 +47,11 @@ export async function createCoastalScene() {
     if (b.format === 'garden') for (const dx of [-6,6]) place('Coast_Bench', b.x + dx, .23, b.z + 1.1, Math.PI);
     if (b.format === 'plaza') {
       place('Plaza_Fountain', b.x, .23, b.z);
-      for (const dx of [-3,3]) place('Coast_Bench', b.x + dx, .23, b.z, dx < 0 ? Math.PI / 2 : -Math.PI / 2);
+      for (const dx of [-3.5,3.5]) place('Coast_Bench', b.x + dx, .23, b.z + (dx < 0 ? 1.9 : -1.9), dx < 0 ? Math.PI / 2 : -Math.PI / 2); // beside the paths, facing the fountain
     }
     if (b.format === 'dockyard') {
       place('Lifeguard_Hut', b.x - 2, .23, b.z - 2);
-      place('Harbor_Jetty', 63, 0, b.z, Math.PI / 2);
+      place('Harbor_Jetty', b.x + 9, 0, b.z, Math.PI / 2); // off the block's east (sea) edge
       place('Coast_Bench', b.x - 2, .23, b.z + 2, Math.PI / 2);
     }
   }
