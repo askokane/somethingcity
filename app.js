@@ -1112,6 +1112,64 @@ function showCityMood() {
   else setMascotMood('happy', 'Gotham', `${accounts.length} sites, no known breach`);
 }
 
+const deckMonthlyDemo = [18, 22, 20, 27, 24, 31, 29, 36, 33, 41, 38, 46];
+let activeDeckSlide = 0;
+function deckSlideMarkup(index) {
+  if (index === 0) {
+    const labels = Array.from({ length: 12 }, (_, offset) => {
+      const date = new Date(); date.setDate(1); date.setMonth(date.getMonth() - 11 + offset);
+      return date.toLocaleString('en-US', { month: 'short' });
+    });
+    const max = Math.max(...deckMonthlyDemo);
+    const bars = deckMonthlyDemo.map((value, i) => `<div class="deck-bar-item"><strong>${value}</strong><i style="--bar-height:${Math.round(value / max * 100)}%"></i><small>${labels[i]}</small></div>`).join('');
+    return `<p class="eyebrow">01 / THE LANDSCAPE</p><h1 id="deck-title">Breaches happen <em>every month.</em></h1><p id="deck-description" class="deck-lede">A year of sample public breach activity, shown as a rolling 12-month view.</p><div class="deck-chart-card"><div class="deck-chart-head"><div><span>RECORDED INCIDENTS</span><strong>${deckMonthlyDemo.reduce((a, b) => a + b, 0).toLocaleString()} <small>sample entries</small></strong></div><span class="deck-period">${labels[0]} — ${labels.at(-1)}<br>ILLUSTRATIVE SERIES</span></div><div class="deck-chart">${bars}</div><div class="deck-chart-axis"><span>MONTHLY SAMPLE COUNT</span><span>FIGURES FOR DEMO ONLY</span></div></div><div class="deck-callout"><b>THE USER PROBLEM</b><span>Even when a company discloses a breach, people still have to figure out whether their own accounts are affected—and what to do about it.</span></div>`;
+  }
+  if (index === 1) return `<p class="eyebrow">02 / WHY WE BUILT THIS</p><h1 id="deck-title">A breach notice is <em>only the beginning.</em></h1><p id="deck-description" class="deck-lede">Exposure information is scattered across services, old inboxes and security notices. It is hard to turn that noise into a clear personal picture.</p><div class="deck-reason-grid"><article><b>01</b><h2>Too many places</h2><p>People use dozens of services, each with its own security page and breach notice.</p></article><article><b>02</b><h2>Hard to prioritize</h2><p>A list of incidents rarely explains which account deserves attention first.</p></article><article><b>03</b><h2>Easy to lose track</h2><p>Old exposures remain relevant, even after the urgent moment has passed.</p></article></div><div class="deck-quote">We built Breach City to make digital exposure visible, understandable, and actionable.</div>`;
+  if (index === 2) return `<p class="eyebrow">03 / HOW IT WORKS</p><h1 id="deck-title">Turn a list into <em>a city you can read.</em></h1><p id="deck-description" class="deck-lede">Each building represents a service in a user's account check. Status, history and next steps stay connected.</p><div class="deck-flow"><article><span class="deck-flow-number">01</span><div><h2>Bring accounts together</h2><p>Check an owned address or use the offline sample city to explore the experience.</p></div></article><article><span class="deck-flow-number">02</span><div><h2>See what needs attention</h2><p>Recent matches, older incidents and unavailable results are shown with distinct states.</p></div></article><article><span class="deck-flow-number">03</span><div><h2>Take a useful next step</h2><p>Open a service report, review exposed data, and follow a focused security checklist.</p></div></article></div><div class="deck-data-note"><span>PRIVACY BY DESIGN</span><p>We never ask for account passwords. A “no known match” result only describes the source checked; it is not a guarantee.</p></div>`;
+  const counts = countStatuses(accounts);
+  const exposedSites = accounts.filter(account => account.breaches.length || account.historical.length).length;
+  return `<p class="eyebrow">04 / THE USER BENEFIT</p><h1 id="deck-title">Know where to start. <em>Stay in control.</em></h1><p id="deck-description" class="deck-lede">Breach City gives people a calmer, clearer path from exposure to action.</p><div class="deck-benefit-stats"><div><span>ACCOUNTS IN THIS DEMO</span><strong>${accounts.length}</strong></div><div><span>WITH RECORDED EXPOSURE</span><strong>${exposedSites}</strong></div><div><span>CHECKS UNAVAILABLE</span><strong>${counts.unknown}</strong></div></div><div class="deck-benefits"><article><i>↗</i><span><b>Understand the result</b><small>See what was exposed and when, with historical incidents kept in context.</small></span></article><article><i>✓</i><span><b>Choose a next step</b><small>Get practical prompts for password changes, MFA and account review.</small></span></article><article><i>◎</i><span><b>Keep agency</b><small>Decide what to act on; progress is self-reported and stays in the browser.</small></span></article></div><div class="deck-callout"><b>THE PROMISE</b><span>Less guesswork. A more useful view of your digital footprint.</span></div>`;
+}
+function renderDeck() {
+  document.querySelector('#deck-content').innerHTML = deckSlideMarkup(activeDeckSlide);
+  document.querySelector('#deck-counter').textContent = `${String(activeDeckSlide + 1).padStart(2, '0')} / 04`;
+  document.querySelector('#deck-prev').disabled = activeDeckSlide === 0;
+  document.querySelector('#deck-next').textContent = activeDeckSlide === 3 ? 'RESTART ↺' : 'NEXT →';
+  const dots = document.querySelector('#deck-dots');
+  dots.replaceChildren(...Array.from({ length: 4 }, (_, index) => {
+    const dot = document.createElement('button'); dot.type = 'button'; dot.className = 'deck-dot';
+    dot.setAttribute('aria-label', `Go to slide ${index + 1}`); dot.setAttribute('aria-current', index === activeDeckSlide ? 'step' : 'false');
+    dot.addEventListener('click', () => { activeDeckSlide = index; renderDeck(); }); return dot;
+  }));
+}
+function openDeck() {
+  activeDeckSlide = 0; renderDeck();
+  const deck = document.querySelector('#bat-deck'); deck.hidden = false; deck.setAttribute('aria-hidden', 'false');
+  document.querySelector('#deck-close').focus();
+}
+function closeDeck() {
+  const deck = document.querySelector('#bat-deck'); deck.hidden = true; deck.setAttribute('aria-hidden', 'true');
+  document.querySelector('#bat-status').focus();
+}
+document.querySelector('#bat-status').addEventListener('click', openDeck);
+document.querySelector('#deck-close').addEventListener('click', closeDeck);
+document.querySelector('#deck-prev').addEventListener('click', () => { activeDeckSlide = Math.max(0, activeDeckSlide - 1); renderDeck(); });
+document.querySelector('#deck-next').addEventListener('click', () => { activeDeckSlide = activeDeckSlide === 3 ? 0 : activeDeckSlide + 1; renderDeck(); });
+document.querySelector('#bat-deck').addEventListener('click', event => { if (event.target.id === 'bat-deck') closeDeck(); });
+document.addEventListener('keydown', event => {
+  const deck = document.querySelector('#bat-deck');
+  if (deck.hidden) return;
+  if (event.key === 'Escape') { closeDeck(); return; }
+  if (event.key === 'ArrowRight') { activeDeckSlide = activeDeckSlide === 3 ? 0 : activeDeckSlide + 1; renderDeck(); }
+  if (event.key === 'ArrowLeft') { activeDeckSlide = Math.max(0, activeDeckSlide - 1); renderDeck(); }
+  if (event.key === 'Tab') {
+    const items = [...deck.querySelectorAll('button')].filter(item => item.getClientRects().length && !item.disabled);
+    const first = items[0], last = items.at(-1);
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+  }
+});
+
 function openPhone({ eyebrow, title, subtitle, cards, counts = null, listTitle, rows, note, focus, zoom = camera.zoom, mood = 'happy' }) {
   document.querySelector('.mission-board')?.remove();
   document.querySelector('.city-stats-dialog').classList.remove('is-mission-board');
