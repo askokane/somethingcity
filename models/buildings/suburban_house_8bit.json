@@ -1,0 +1,15 @@
+{
+  "name": "Suburban House",
+  "style": "Gotham-inspired 8-bit",
+  "tile_m": [9.7, 8.9],
+  "height_m": 8.73,
+  "bounds_m": {
+    "min": [-5.045, -4.465, -0.4],
+    "max": [4.85, 4.45, 8.33]
+  },
+  "origin_m": [0, 0, 0],
+  "front": "-Y",
+  "blend": "suburban_house_8bit.blend",
+  "glb": "suburban_house_8bit.glb",
+  "render": "suburban_house_8bit.png"
+}
