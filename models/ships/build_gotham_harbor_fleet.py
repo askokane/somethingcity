@@ -155,12 +155,17 @@ box(r,'Rowboat_center_thwart',-.05,.51,0,.13,.12,.86,'pale')
 
 # Large, distant container ship silhouette with readable stacked cargo.
 r=root('Horizon_Container_Ship_Narrows','Horizon hero ship',28,8.2); fleet.append(r); hull(r,'Container_ship_hull',28,8.2,1.9,'hull')
-box(r,'Container_ship_deck',-1.4,1.98,0,22, .2,7.5,'wood')
-for row,z in enumerate([-2.25,0,2.25]):
+box(r,'Container_ship_deck',-1.4,1.98,0,22,.2,7.5,'wood')
+container_height=1.35
+deck_top=1.98+.2/2
+for lane,z in enumerate([-2.25,0,2.25]):
     for col,x in enumerate([-8.7,-6.0,-3.3,-.6,2.1,4.8,7.5]):
-        color=['rust','teal','slate','pale'][(row*3+col)%4]
-        box(r,'Hero_container',x,2.85+row*1.5,z,2.5,1.35,1.95,color)
-        for rib in [-.9,-.3,.3,.9]: box(r,'Container_corrugation',x+rib,2.86+row*1.5,z-.99,.045,1.12,.035,'shadow')
+        color=['rust','teal','slate','pale'][(lane*3+col)%4]
+        for tier in range(3):
+            center_y=deck_top+container_height*(tier+.5)
+            box(r,'Hero_container',x,center_y,z,2.5,container_height,1.95,color)
+            for rib in [-.9,-.3,.3,.9]:
+                box(r,'Container_corrugation',x+rib,center_y,z-.99,.045,container_height*.88,.035,'shadow')
 box(r,'Ship_bridge',-10.2,3.0,0,3.1,2.6,3.5,'pale'); box(r,'Ship_bridge_roof',-10.2,4.38,0,3.45,.16,3.8,'slate')
 for x in [-11.15,-10.45,-9.75]: box(r,'Bridge_window',x,3.25,-1.78,.42,.48,.07,'water')
 box(r,'Ship_funnel',-11.3,5.2,0,.85,1.45,.95,'rust'); box(r,'Ship_funnel_cap',-11.3,5.98,0,1.05,.14,1.14,'hull')
