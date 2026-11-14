@@ -43,7 +43,7 @@ function districtOf(region, col) {
 
 const landmarkSpecs = [
   // [name, model, [row, col], height]: each sits in its district from the map.
-  ['Wayne Tower', 'wayne_tower.glb', [13, 11], 58], // Downtown; comically tall: ~3x the tallest website tower
+  ['Wayne Tower', 'wayne_tower.glb', [12, 11], 30], // Downtown, on a 2x2-block site with a forecourt; the city's tallest tower
   ['Arkham Asylum', 'arkham_asylum_8bit.glb', [10, 10], 7], // the Narrows
   ['GCPD Headquarters', 'gcpd_headquarters_8bit.glb', [1, 12], 5], // Uptown
   ['Gotham Bank', 'gotham_bank_8bit.glb', [7, 11], 6], // Midtown, the financial core
@@ -74,7 +74,7 @@ export const CITY_CENTER_Z = (minZ + maxZ) / 2;
 // Bridges across the water, from cell edge to cell edge: [row, col] of the land at each end (same row or same column).
 // Bridges across the water, from cell edge to cell edge: [row, col] of the land at each end (same row or same column),
 // and which of Atharva's bridge models crosses there.
-const bridgeSpans = [
+export const bridgeSpans = [
   [[7, 2], [7, 5], 'gothic'], [[12, 2], [12, 5], 'gothic'], // Bristol - Reatton and West Harlow over the Gotham River
   [[3, 9], [6, 9], 'gothic'], // Uptown - Midtown over the upper inlet
   [[2, 7], [5, 7], 'gothic'], // Uptown - South Channel Island
@@ -113,6 +113,8 @@ merge(['3,10', '3,11'], 'garden', 'Robinson Park'); // Uptown
 merge(['7,6', '7,7'], 'garden', 'Gotham Commons'); // Reatton, on the river
 merge(['12,6', '12,7'], 'market', 'Chinatown Market'); // Downtown west
 merge(['14,11', '14,12'], 'garden', 'Stevensburgh Green'); // Downtown, by the south shore
+// Wayne Tower's site: four blocks, so the tower keeps its real proportions (scaled evenly) and is still comically tall.
+merge(['12,11', '12,12', '13,11', '13,12'], 'landmark', 'Stevensburgh');
 for (const [id, format, district] of [['13,9', 'plaza', 'Founders Square'], ['12,16', 'dockyard', 'Haysville Docks'], ['13,6', 'dockyard', 'West Harlow Docks'], ['1,15', 'lighthouse', 'North Point Light']]) {
   const b = blocks.find((block) => block.sourceId === id);
   b.format = format; b.district = district; b.width = b.depth = 9;
@@ -122,7 +124,7 @@ export const landmarks = landmarkSpecs.map(([name, file, [row, col], height]) =>
   const block = blocks.findIndex((b) => b.sourceId === `${row},${col}`);
   if (block < 0) throw new Error(`Missing landmark block: ${name}`);
   blocks[block].format = 'landmark';
-  blocks[block].width = blocks[block].depth = 9;
+  if (blocks[block].cells.length === 1) blocks[block].width = blocks[block].depth = 9; // merged sites keep their size
   return { name, file, block, height };
 });
 // A bridge lands on an avenue: the block it meets gets a straight road through its middle, continuing the bridge into the

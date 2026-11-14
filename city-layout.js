@@ -9,6 +9,23 @@ import { seededRandom } from './city-scatter.js';
 import { blocks, slots, islands, bridges, landCells, edges, landmarks, FLOOR } from './city-plan.js';
 export * from './city-plan.js';
 
+// Which side of a shore edge is land, and which block owns that land.
+const landAt = new Map(landCells.map((c) => [`${c.x},${c.z}`, c]));
+const blockOf = new Map();
+blocks.forEach((b) => b.cells.forEach((c) => blockOf.set(`${c.x},${c.z}`, b)));
+const shoreSide = (edge) => {
+  const [a, b] = edge.vertical ? [[edge.x - 6, edge.z], [edge.x + 6, edge.z]] : [[edge.x, edge.z - 6], [edge.x, edge.z + 6]];
+  const inner = landAt.has(`${a[0]},${a[1]}`) ? a : b;
+  const outward = edge.vertical ? Math.sign(edge.x - inner[0]) : Math.sign(edge.z - inner[1]);
+  return { block: blockOf.get(`${inner[0]},${inner[1]}`), outward };
+};
+// Working waterfronts keep their seawall: the docks and Ace Chemicals.
+const keepsSeawall = (block) => block?.format === 'dockyard' || landmarks.some((l) => l.name === 'Ace Chemicals' && blocks[l.block] === block);
+// Shoreline streets were half a street (the land-side lane, sand beyond). Away from beaches and working waterfronts the
+// coast is pushed out one lane so they are full two-lane streets; keyed by the edge's midpoint "x,z".
+export const widenedShore = new Set(edges.filter((edge) => edge.shore && !isBeachEdge(edge) && !keepsSeawall(shoreSide(edge).block)).map((edge) => `${edge.x},${edge.z}`));
+const LANE_WIDTH = 1.5;
+
 export function createCity(scene) {
   const group = new THREE.Group();
   group.name = 'Density city';
@@ -72,26 +89,38 @@ export function createCity(scene) {
       for (const t of [-4.5, -1.5, 1.5, 4.5]) cube(b.x + (alongX ? t : 0), 0.255, b.z + (alongX ? 0 : t), alongX ? 1.2 : .06, .01, alongX ? .06 : 1.2, '#b1a383');
     }
   }
-  // Which side of a shore edge is land, and which block owns that land.
-  const landAt = new Map(landCells.map((c) => [`${c.x},${c.z}`, c]));
-  const blockOf = new Map();
-  blocks.forEach((b) => b.cells.forEach((c) => blockOf.set(`${c.x},${c.z}`, b)));
-  const shoreSide = (edge) => {
-    const [a, b] = edge.vertical ? [[edge.x - 6, edge.z], [edge.x + 6, edge.z]] : [[edge.x, edge.z - 6], [edge.x, edge.z + 6]];
-    const inner = landAt.has(`${a[0]},${a[1]}`) ? a : b;
-    const outward = edge.vertical ? Math.sign(edge.x - inner[0]) : Math.sign(edge.z - inner[1]);
-    return { block: blockOf.get(`${inner[0]},${inner[1]}`), outward };
-  };
-  // Working waterfronts keep their seawall: the docks and Ace Chemicals.
-  const keepsSeawall = (block) => block?.format === 'dockyard' || landmarks.some((l) => l.name === 'Ace Chemicals' && blocks[l.block] === block);
   // A thin sand border on the water side: a dry upper strip and a wet lower lip, overlapping at the corners.
+  // The widened shore: one more lane of asphalt, a raised sidewalk, then the sand (a dry upper strip and a wet lower lip).
+  // Each layer is a band [from, to] units out from the old shoreline, mitred at the coast's corners so neighbouring
+  // edges' bands meet without overlapping: at an outside corner vertical edges reach round the corner and horizontal
+  // ones stop short of it; at an inside corner the reverse.
+  const SIDEWALK = 0.8;
+  const layers = [
+    [0, LANE_WIDTH + SIDEWALK, -0.89, 1.82, '#46515a'], // the island's rock base
+    [0, LANE_WIDTH, 0.03, 0.08, '#252d35'], // asphalt
+    [LANE_WIDTH, LANE_WIDTH + SIDEWALK, 0.12, 0.22, '#555c62'], // sidewalk, level with the blocks' pavements
+  ];
+  const sandFrom = LANE_WIDTH + SIDEWALK;
+  for (const [from, width, top, color] of [[0, 1.2, 0.0, '#c9b48a'], [0.9, 0.8, -0.32, '#a8916a']]) {
+    layers.push([sandFrom + from, sandFrom + from + width, (top - (top + 0.9) / 2), top + 0.9, color]);
+  }
+  const cornerKind = (edge, outward, end) => {
+    const inner = edge.vertical ? [edge.x - outward * 6, edge.z] : [edge.x, edge.z - outward * 6];
+    const step = (p, along, out) => edge.vertical ? [p[0] + out, p[1] + along] : [p[0] + along, p[1] + out];
+    if (!landAt.has(step(inner, end * 12, 0).join(','))) return 'outside';
+    return landAt.has(step(inner, end * 12, outward * 12).join(',')) ? 'inside' : 'straight';
+  };
   const sandStrip = (edge, outward) => {
-    for (const [offset, width, top, color] of [[0.6, 1.2, 0.0, '#c9b48a'], [1.5, 0.8, -0.32, '#a8916a']]) {
-      const across = edge.vertical ? edge.x + outward * offset : edge.z + outward * offset;
-      const length = 12 + 2.6;
-      const height = top + 0.9;
-      cube(edge.vertical ? across : edge.x, top - height / 2, edge.vertical ? edge.z : across, edge.vertical ? width : length, height, edge.vertical ? length : width, color);
+    const along = edge.vertical ? edge.z : edge.x;
+    const ends = [-1, 1].map((end) => cornerKind(edge, outward, end));
+    for (const [from, to, y, height, color] of layers) {
+      const reach = edge.vertical ? to : from; // how far past the corner this band runs (or stops short of it)
+      const [start, stop] = [-1, 1].map((end, i) => along + end * (6 + (ends[i] === 'outside' ? reach : ends[i] === 'inside' ? -reach : 0)));
+      const mid = (start + stop) / 2, length = stop - start;
+      const across = (edge.vertical ? edge.x : edge.z) + outward * (from + to) / 2;
+      cube(edge.vertical ? across : mid, y, edge.vertical ? mid : across, edge.vertical ? to - from : length, height, edge.vertical ? length : to - from, color);
     }
+    for (const offset of [-4.5, -1.5, 1.5, 4.5]) cube(edge.x + (edge.vertical ? 0 : offset), .085, edge.z + (edge.vertical ? offset : 0), edge.vertical ? .06 : 1.2, .015, edge.vertical ? 1.2 : .06, '#b1a383');
   };
   for (const edge of edges) {
     const side = edge.shore && !isBeachEdge(edge) ? shoreSide(edge) : null;

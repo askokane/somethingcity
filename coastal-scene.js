@@ -6,14 +6,9 @@ import { blocks, isOnLand } from './city-plan.js';
 
 export async function createCoastalScene() {
   const loader = new GLTFLoader();
-  const [gltf, waterfrontGltf, boats] = await Promise.all([
+  const [gltf, waterfrontGltf] = await Promise.all([
     loader.loadAsync('./models/everything-else/gotham_coastal_kit.glb'),
     loader.loadAsync('./models/waterfront/gotham_waterfront_kit.glb'),
-    Promise.all([
-      ['sailboat', './models/ships/sailboat_west_bay.glb'],
-      ['rowboat', './models/ships/rowboat_beach_cove.glb'],
-      ['fishing', './models/ships/fishing_skiff_blackgate.glb'],
-    ].map(async ([name, path]) => [name, await loader.loadAsync(path)])),
   ]);
   const group = new THREE.Group(); group.name = 'Blender coastal districts';
   function prototype(name) {
@@ -29,7 +24,6 @@ export async function createCoastalScene() {
     group.add(root); return root;
   }
   const waterfrontGroup = new THREE.Group(); waterfrontGroup.name = 'Gotham waterfront infrastructure'; group.add(waterfrontGroup);
-  const fleetGroup = new THREE.Group(); fleetGroup.name = 'Moored beach and marina craft'; group.add(fleetGroup);
   function waterfrontPrototype(name) {
     const found = waterfrontGltf.scene.getObjectByName(name);
     if (!found) throw new Error(`Waterfront asset missing: ${name}`);
@@ -41,13 +35,6 @@ export async function createCoastalScene() {
     model.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;}});
     waterfrontGroup.add(model); return model;
   }
-  function placeBoat(name,x,y,z,rotation=0,scale=1) {
-    const gltf=Object.fromEntries(boats)[name];
-    const model=gltf.scene.clone(true); model.name=`Marina_${name}`;
-    model.position.set(x,y,z); model.rotation.y=rotation; model.scale.setScalar(scale);
-    model.traverse(node=>{if(node.isMesh){node.castShadow=true;node.receiveShadow=true;}});
-    fleetGroup.add(model); return model;
-  }
   for (const beach of beaches) {
     const patch = place('Beach_Sand_Patch', beach.x, 0, beach.z, beach.rotation);
     patch.name = beach.name;
@@ -58,7 +45,8 @@ export async function createCoastalScene() {
       const p=beachPoint(beach,x,z); return placeWaterfront(name,p.x,y,p.z,beach.rotation+angle,scale);
     };
     local('Beach_Steps', 0, 0, 0);
-    waterfrontLocal('Beach_Boardwalk_Segment',0,.12,.12);
+    // A short boardwalk (the kit's segment is 12 units long, so it's scaled down); Reatton has the fishing pier instead.
+    if (beach.name !== 'Reatton Beach') waterfrontLocal('Beach_Boardwalk_Segment',0,.12,.12,0,.45);
     for (const x of [-10.5,-8.7,8.8,10.4]) {
       local('Coast_Rock', x, -.05, 1.3 + Math.abs(x) % 2, x, beach.style === 'rocky' ? 1.7 : .9);
       local('Dune_Grass', x + .5, .1, .7, x);
@@ -69,7 +57,7 @@ export async function createCoastalScene() {
         local('Beach_Umbrella', x, .02, z);
         local('Beach_Lounger', x + 1.3, -.02, z + .2, .15);
       }
-      local('Lifeguard_Hut', 8, .02, 1.5, -.2);
+      local('Lifeguard_Hut', beach.name === 'Reatton Beach' ? 1.5 : 8, .02, 1.5, -.2); // Reatton's fishing pier stands at x 7.5
     } else {
       local('Coast_Bench', -4, .08, .8, Math.PI);
       local('Coast_Rock', 6, -.18, 5.5, .7, 1.9);
@@ -104,10 +92,7 @@ export async function createCoastalScene() {
     const out = (d) => face + side * d; // d > 0: further offshore
     const offshore = side > 0 ? Math.PI / 2 : -Math.PI / 2; // turns the kit's +Z toward the sea
     const k = PORT_SCALE;
-    placeWaterfront('Marina_Floating_Slips', out(2.6), -.12, dock.z - 1.5, offshore, k);
-    placeBoat('sailboat', out(3.4), -.05, dock.z - 3.2, side > 0 ? 0 : Math.PI, .42);
-    placeBoat('fishing', out(4.4), -.08, dock.z + .6, side > 0 ? 0 : Math.PI, .45);
-    placeBoat('rowboat', out(5.4), -.02, dock.z - 3.0, side > 0 ? 0 : Math.PI, .45);
+    // No marina: the water under the crane, between the rock pile and the breakwater, is the cargo barge's berth.
     placeWaterfront('Gantry_Crane_Haysville', out(-1.6), .23, dock.z + 2.6, side > 0 ? 0 : Math.PI, k);
     placeWaterfront('Warehouse_Haysville_Docks', dock.x - side * 2.4, .23, dock.z - 1, Math.PI / 2, k);
     placeWaterfront('Container_Rust', dock.x + side * .4, .23, dock.z - 2.6, 0, k);
@@ -142,7 +127,7 @@ export async function createCoastalScene() {
   staticMeshes.forEach(mesh=>mesh.parent.remove(mesh));
   waterfrontGroup.userData.renderBatches=staticBatches.size;
   waterfrontGroup.userData.update=time=>{if(sweep) sweep.rotation.y=time*.36;};
-  waterfrontGroup.userData.namedAssets=['Lighthouse_North_Head','Fishing_Pier_People','Marina_Floating_Slips','Breakwater_Harbor_Light','Gantry_Crane_Haysville'];
+  waterfrontGroup.userData.namedAssets=['Lighthouse_North_Head','Fishing_Pier_People','Breakwater_Harbor_Light','Gantry_Crane_Haysville'];
   group.userData.update=time=>waterfrontGroup.userData.update(time);
   for (const b of blocks) {
     if (b.format === 'market') for (const dx of [-8,-4,0,4,8]) for (const dz of [-3.1,3.1]) place('Market_Stall', b.x + dx, .23, b.z + dz, dz < 0 ? Math.PI : 0);
@@ -154,7 +139,9 @@ export async function createCoastalScene() {
     if (b.format === 'dockyard') {
       place('Lifeguard_Hut', b.x - 2, .23, b.z - 2);
       const sea = isOnLand(b.x + 12, b.z) ? -1 : 1;
-      place('Harbor_Jetty', b.x + sea * 9, 0, b.z + 6, sea > 0 ? Math.PI / 2 : -Math.PI / 2); // off the block's sea edge, clear of the marina
+      // The jetty stands beyond the breakwater, outside the port (north of the rock pile where the shore ends first).
+      const jz = isOnLand(b.x + sea * 5, b.z + 13) ? b.z + 13 : b.z - 11;
+      place('Harbor_Jetty', b.x + sea * 6, 0, jz, sea > 0 ? Math.PI / 2 : -Math.PI / 2, .6);
       place('Coast_Bench', b.x - 2, .23, b.z + 2, Math.PI / 2);
     }
   }
@@ -167,7 +154,7 @@ export async function createCoastalScene() {
     if (node.name.startsWith('Lighthouse_rotating_light_beam')) return;
     let root = node.parent;
     while (root && root.parent !== group && root !== group) root = root.parent;
-    if (root === waterfrontGroup || root === fleetGroup) return;
+    if (root === waterfrontGroup) return;
     const key = node.material.uuid + ':' + node.castShadow;
     if (!batches.has(key)) batches.set(key, { material: node.material, shadow: node.castShadow, geometry: [] });
     const geometry = node.geometry.index ? node.geometry.toNonIndexed() : node.geometry.clone();

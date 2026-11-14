@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellZ, isOnLand } from './city-layout.js';
+import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellX, cellZ, isOnLand, landCells, bridgeSpans, widenedShore } from './city-layout.js';
 import { scatterSlotOrder, freshPlacementSeed, seededRandom as placementRandomGenerator } from './city-scatter.js';
 import { checkAccount, checkSignedIn } from './checker/checker.js';
 import { buildMissions, readProgress, saveProgress, serviceUrl } from './mission-board.js';
@@ -512,11 +512,13 @@ let accountModelsReady = false;
 let loadedBuildingModels = null;
 const landmarkRoots = [];
 
-// Bristol Heights: a suburb of Daniel's account_building_01 houses on cul-de-sacs. A spine road runs north-south down the
-// block; cul-de-sacs branch east and west and end in turning circles, each fanned by three houses facing in; more houses
-// line the spine between them; a connector road meets the river bridge. Lawns, yard trees. Not clickable.
-function buildSuburbs() {
-  const house = loadedBuildingModels?.towers?.[0];
+// Bristol Heights: a suburb of Daniel's 8-bit suburban houses on cul-de-sacs. A spine road runs north-south down the
+// block; cul-de-sacs branch east and west and end in turning circles. Two houses line each side of every stub and one
+// closes the end of the bulb, all facing the road and kept inside the block; a connector road meets the river bridge.
+// Lawns and yard trees. Not clickable.
+const HOUSE_SCALE = 0.3; // ~3 x 2.7 units, ~2.6 units tall: under true road scale so each house keeps a yard
+async function buildSuburbs() {
+  const house = await loadModel('./models/buildings/suburban_house_8bit.glb').catch(() => loadedBuildingModels?.towers?.[0]);
   const group = new THREE.Group();
   group.name = 'Bristol Heights suburb';
   scene.add(group);
@@ -539,39 +541,27 @@ function buildSuburbs() {
   };
   const homes = [];
   const yards = [];
+  const facing = (fx, fz) => Math.atan2(fx, fz); // the house's front is +Z
   for (const b of blocks.filter((block) => block.format === 'suburb')) {
     const random = seededRandom(9001 + Math.round(b.x * 7 + b.z));
     const top = b.z - b.depth / 2;
+    const bulbX = b.width / 2 - 6; // turning circle centre, from the spine
     road(b.x, b.z, 2, b.depth - 0.4); // spine
     road(b.x + b.width / 4 + 0.5, cellZ(7), b.width / 2 - 1, 2); // connector to the river bridge (row 7)
-    const rows = [];
-    for (let z = top + 11; z < top + b.depth - 6; z += 11) rows.push(z);
-    for (const z of rows) {
+    for (let z = top + 11; z < top + b.depth - 6; z += 11) {
       for (const side of [-1, 1]) {
-        const reach = b.width / 2 - 7; // cul-de-sac stub length from the spine (fan of houses stays on the block)
-        road(b.x + side * (1 + reach / 2), z, reach, 1.6);
-        const bx = b.x + side * (1 + reach);
-        circle(bx, z, 2.2);
-        // Three houses fanned around the turning circle, fronts facing it.
-        for (const angle of [-1, 0, 1].map((k) => k * Math.PI / 3)) {
-          const dx = side * Math.cos(angle) * 4.4;
-          const dz = Math.sin(angle) * 4.4;
-          homes.push([bx + dx, 0.23, z + dz, Math.atan2(-dx, -dz)]);
-        }
-        // Yard trees behind the stub houses.
-        if (random() > 0.35) yards.push([b.x + side * (2.8 + random() * 2), z + (random() > 0.5 ? 3.4 : -3.4)]);
+        road(b.x + side * (1 + (bulbX - 1) / 2), z, bulbX - 1, 1.6);
+        circle(b.x + side * bulbX, z, 1.8);
+        for (const along of [3.4, 7.2]) for (const across of [-1, 1]) homes.push([b.x + side * along, 0.23, z + across * 2.7, facing(0, -across)]);
+        homes.push([b.x + side * (bulbX + 3.6), 0.23, z, facing(-side, 0)]); // closing the bulb
+        // Yard trees in the bulb's corners.
+        for (const across of [-1, 1]) if (random() > 0.3) yards.push([b.x + side * (bulbX + 1.2), z + across * 3.6]);
       }
-    }
-    // Houses along the spine between cul-de-sacs, facing the spine.
-    for (let i = 0; i < rows.length - 1; i++) {
-      const z = (rows[i] + rows[i + 1]) / 2;
-      homes.push([b.x - 3.4, 0.23, z, Math.PI / 2], [b.x + 3.4, 0.23, z, -Math.PI / 2]);
     }
     for (let i = 0; i < 6; i++) yards.push([b.x + (random() - 0.5) * (b.width - 3), top + 2 + random() * 4]);
   }
   if (house) {
-    const size = new THREE.Box3().setFromObject(house).getSize(new THREE.Vector3());
-    instanceModel(house, 3.2 / Math.max(size.x, size.z), homes, group); // 3.2 units wide, ~7 m tall: a two-storey house
+    instanceModel(house, HOUSE_SCALE, homes, group);
     flickerWindows(group);
   }
   const tree = parkKit?.streetTree;
@@ -585,7 +575,11 @@ function buildSuburbs() {
 const SHIPS = [
   { file: 'horizon_container_ship_narrows', mode: 'pass', from: [150, -230], to: [150, 230], speed: 1.6 },
   { file: 'gcpd_harbor_patrol', mode: 'loop', centre: [-18, -6], radius: [160, 160], speed: 5 }, // clears every corner of the map
-  { file: 'tugboat_east_quay', mode: 'loop', centre: [104, 36], radius: [8, 16], speed: 2.2 },
+  { file: 'tugboat_east_quay', mode: 'loop', centre: [108, 0], radius: [8, 16], speed: 2.2 }, // clear of the cargo lane
+  // Cargo barge between the two ports: Haysville Docks' berth (east shore), out to sea, south of South Hinkley (no
+  // bridges to pass under), up the channel east of Bristol to West Harlow Docks' berth (west shore). Each berth is under
+  // the port's crane, inside its breakwater. Corners are rounded into arcs.
+  { file: 'cargo_barge_gotham_river', mode: 'route', points: [[86.5, 40], [104, 40], [104, 108], [-84, 108], [-84, 52], [-62.5, 52]], speed: 2.4 },
   { file: 'bristol_midtown_ferry', mode: 'shuttle', from: [-84, 12], to: [-36, 12], speed: 2.4 }, // lower inlet, west of the bridge
   { file: 'cargo_barge_gotham_river', mode: 'shuttle', from: [-76, -104], to: [-76, -40], speed: 1.4 }, // Gotham River, north of the bridges
   { file: 'fishing_trawler_narrows', mode: 'drift', at: [118, -62], heading: 2.2 },
@@ -617,13 +611,30 @@ async function launchShips() {
   await Promise.all(SHIPS.map(async (spec, i) => {
     const model = await loadModel(`./models/ships/${spec.file}.glb`).catch(() => null);
     if (!model) return;
-    const anchor = spec.at ?? spec.from ?? spec.centre;
+    const anchor = spec.at ?? spec.from ?? spec.centre ?? spec.points[0];
     if (spec.at && isOnLand(spec.at[0], spec.at[1], -2.5)) { console.warn(`${spec.file} would sit on land; skipped`); return; }
     model.rotation.order = 'YXZ';
+    model.scale.setScalar(spec.scale ?? 1);
     model.traverse((node) => { if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
     group.add(model);
     const length = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).x;
-    fleet.push({ ...spec, model, length, phase: i * 1.7, anchor });
+    let curve = null;
+    if (spec.points) { // straight legs joined by quadratic arcs (radius up to 10)
+      const pts = spec.points.map(([x, z]) => new THREE.Vector3(x, 0, z));
+      curve = new THREE.CurvePath();
+      let from = pts[0];
+      for (let j = 1; j < pts.length - 1; j++) {
+        const [prev, corner, next] = [pts[j - 1], pts[j], pts[j + 1]];
+        const r = Math.min(10, corner.distanceTo(prev) / 2, corner.distanceTo(next) / 2);
+        const a = corner.clone().addScaledVector(prev.clone().sub(corner).normalize(), r);
+        const b = corner.clone().addScaledVector(next.clone().sub(corner).normalize(), r);
+        curve.add(new THREE.LineCurve3(from, a));
+        curve.add(new THREE.QuadraticBezierCurve3(a, corner, b));
+        from = b;
+      }
+      curve.add(new THREE.LineCurve3(from, pts[pts.length - 1]));
+    }
+    fleet.push({ ...spec, model, length, phase: i * 1.7, anchor, curve });
   }));
 }
 function updateShips(time) {
@@ -645,6 +656,15 @@ function updateShips(time) {
       const eased = ship.mode === 'shuttle' ? t * t * (3 - 2 * t) : t; // the ferry and barge slow down at each end
       [x, z] = [x1 + (x2 - x1) * eased, z1 + (z2 - z1) * eased];
       [hx, hz] = back ? [x1 - x2, z1 - z2] : [x2 - x1, z2 - z1];
+    } else if (ship.mode === 'route') {
+      // Out and back along the curve, easing in and out of each berth.
+      let t = ((time * ship.speed) / ship.curve.getLength()) % 2;
+      const back = t > 1;
+      if (back) t = 2 - t;
+      const u = t * t * (3 - 2 * t);
+      const p = ship.curve.getPointAt(u), dir = ship.curve.getTangentAt(u);
+      [x, z] = [p.x, p.z];
+      [hx, hz] = back ? [-dir.x, -dir.z] : [dir.x, dir.z];
     } else {
       const [ax, az] = ship.anchor;
       const sway = ship.mode === 'drift' ? 2.5 : 0.4; // fishing boats wander on their lines; moored boats barely move
@@ -727,10 +747,435 @@ async function placeBatSignal() {
   bat.position.y = length;
   tilt.add(bat);
   scene.add(tilt);
+  batSignalBeam = tilt;
+  syncBatSignal();
+}
+
+// Lit while any recently breached site still has its 'replace exposed passwords' or 'enable multi-factor' mission open on
+// GCPD's board (progress is the mission board's, saved in this browser). Dark once those are done, or with no breach.
+let batSignalBeam = null;
+function syncBatSignal() {
+  if (!batSignalBeam) return;
+  const scope = currentCheck?.id || 'sample-city';
+  let storage;
+  try { storage = window.localStorage; } catch { /* private mode: session progress only */ }
+  const progress = missionSession.get(scope) || readProgress(storage, scope);
+  const open = buildMissions(accounts.filter((account) => account.status === 'breached'))
+    .some((task) => ['password', 'mfa'].includes(JSON.parse(task.key)[2]) && !progress[task.key]);
+  batSignalBeam.visible = open;
+}
+
+// ---- Batman's run -------------------------------------------------------------------------------------------------
+// Select a website or landmark and Batman leaves the Batcave under Wayne Manor: a trap door opens in the street on Wayne
+// Estate's south side, he rises out of it, the doors close, and he drives the streets and bridges to the building,
+// parking beside it. Select another and he drives on from where he is.
+// Placeholder: until the Batmobile model is uploaded (models/vehicles/batmobile.glb) or Tai exports Batman
+// (models/npcs/gotham_batman.glb), a blocky Batman built from boxes, matching Tai's render, stands in.
+
+// Street graph: nodes at block corners; a street runs along every cell edge that touches land, except inside a merged
+// block (parks, the suburb); bridges join their two shores at the bridged edge's midpoint.
+const roadGraph = (() => {
+  const cellAt = new Map(landCells.map((c) => [`${c.row},${c.col}`, c]));
+  const blockOf = new Map();
+  blocks.forEach((b, i) => b.cells.forEach((c) => blockOf.set(`${c.row},${c.col}`, i)));
+  const nodes = new Map(); // key -> { x, z, links: Map(key -> length) }
+  const node = (key, x, z) => { if (!nodes.has(key)) nodes.set(key, { key, x, z, links: new Map() }); return nodes.get(key); };
+  const corner = (i, j) => node(`c${i},${j}`, cellX(j) - 6, cellZ(i) - 6);
+  const link = (a, b) => { const d = Math.hypot(a.x - b.x, a.z - b.z); a.links.set(b.key, d); b.links.set(a.key, d); };
+  const street = (cellA, cellB) => {
+    const a = cellAt.has(cellA), b = cellAt.has(cellB);
+    if (!a && !b) return false;
+    return !(a && b && blockOf.get(cellA) === blockOf.get(cellB)); // no street through a merged block
+  };
+  const rows = Math.max(...landCells.map((c) => c.row)) + 2;
+  const cols = Math.max(...landCells.map((c) => c.col)) + 2;
+  for (let i = 0; i <= rows; i++) for (let j = 0; j <= cols; j++) {
+    if (j < cols && street(`${i - 1},${j}`, `${i},${j}`)) link(corner(i, j), corner(i, j + 1)); // along a row boundary
+    if (i < rows && street(`${i},${j - 1}`, `${i},${j}`)) link(corner(i, j), corner(i + 1, j)); // along a column boundary
+  }
+  for (const [[r1, c1], [r2, c2]] of bridgeSpans) {
+    const [ra, ca, rb, cb] = r1 + c1 <= r2 + c2 ? [r1, c1, r2, c2] : [r2, c2, r1, c1];
+    let a, b;
+    if (ca === cb) { // north-south: from the bottom edge of the north cell to the top edge of the south cell
+      a = node(`b${ra},${ca}s`, cellX(ca), cellZ(ra) + 6); link(a, corner(ra + 1, ca)); link(a, corner(ra + 1, ca + 1));
+      b = node(`b${rb},${cb}n`, cellX(cb), cellZ(rb) - 6); link(b, corner(rb, cb)); link(b, corner(rb, cb + 1));
+    } else { // east-west
+      a = node(`b${ra},${ca}e`, cellX(ca) + 6, cellZ(ra)); link(a, corner(ra, ca + 1)); link(a, corner(ra + 1, ca + 1));
+      b = node(`b${rb},${cb}w`, cellX(cb) - 6, cellZ(rb)); link(b, corner(rb, cb)); link(b, corner(rb + 1, cb));
+    }
+    link(a, b);
+  }
+  return nodes;
+})();
+const nearestNode = (x, z) => [...roadGraph.values()].filter((n) => n.links.size).reduce((best, n) => (Math.hypot(n.x - x, n.z - z) < Math.hypot(best.x - x, best.z - z) ? n : best));
+function routeBetween(from, to) {
+  const dist = new Map([[from.key, 0]]), prev = new Map(), open = new Set([from.key]);
+  while (open.size) {
+    let key = null;
+    for (const k of open) if (key === null || dist.get(k) < dist.get(key)) key = k;
+    open.delete(key);
+    if (key === to.key) break;
+    for (const [next, d] of roadGraph.get(key).links) {
+      const alt = dist.get(key) + d;
+      if (alt < (dist.get(next) ?? Infinity)) { dist.set(next, alt); prev.set(next, key); open.add(next); }
+    }
+  }
+  const path = [];
+  for (let k = to.key; k; k = prev.get(k)) path.unshift(roadGraph.get(k));
+  return path[0] === from ? path : [from, to];
+}
+
+// The stand-in rider: blocky Batman (grey suit, dark cowl with ears and cape, yellow belt and emblem), facing +X.
+function blockyBatman() {
+  const group = new THREE.Group();
+  const add = (w, h, d, x, y, z, color) => {
+    const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, roughness: 0.7 }));
+    box.position.set(x, y, z);
+    box.castShadow = true;
+    group.add(box);
+  };
+  const suit = '#8d98ab', dark = '#262b38', gold = '#e0b13c', skin = '#e2b98f';
+  add(0.32, 0.8, 0.28, 0, 0.4, -0.2, dark); add(0.32, 0.8, 0.28, 0, 0.4, 0.2, dark); // legs and boots
+  add(0.5, 0.75, 0.75, 0, 1.15, 0, suit); // torso
+  add(0.52, 0.14, 0.77, 0, 0.82, 0, gold); // utility belt
+  add(0.06, 0.16, 0.42, 0.26, 1.3, 0, gold); // chest emblem
+  add(0.26, 0.7, 0.24, 0, 1.1, -0.5, suit); add(0.26, 0.7, 0.24, 0, 1.1, 0.5, suit); // arms
+  add(0.5, 0.5, 0.5, 0, 1.8, 0, dark); // cowl
+  add(0.06, 0.22, 0.34, 0.24, 1.7, 0, skin); // jaw
+  add(0.12, 0.22, 0.1, 0, 2.15, -0.16, dark); add(0.12, 0.22, 0.1, 0, 2.15, 0.16, dark); // ears
+  add(0.08, 1.4, 0.8, -0.3, 1.0, 0, '#1b1f29'); // cape
+  return group;
+}
+
+const batRun = { rider: null, door: null, path: [], leg: 0, travelled: 0, phase: 'home', clock: 0, target: null };
+const TRAP_DOOR = { x: cellX(1), z: cellZ(5) - 6 }; // the street on Wayne Estate's south side
+async function prepareBatRun() {
+  let rider = null;
+  for (const path of ['./models/vehicles/batmobile.glb', './models/npcs/gotham_batman.glb']) {
+    rider = await loadModel(path).catch(() => null);
+    if (rider) break;
+  }
+  if (!rider) { rider = blockyBatman(); rider.scale.setScalar(2.2); } // larger than life so he reads from the city view
+  rider.visible = false;
+  scene.add(rider);
+  batRun.rider = rider;
+  // Trap door: a dark shaft with two street-coloured leaves that slide apart.
+  const door = new THREE.Group();
+  const shaft = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.04, 2.6), new THREE.MeshBasicMaterial({ color: '#050608' }));
+  shaft.position.y = 0.075;
+  const glow = new THREE.PointLight('#ffd45e', 0, 8, 1.5);
+  glow.position.y = -0.5;
+  const leaves = [-1, 1].map((side) => {
+    const leaf = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.06, 2.6), new THREE.MeshStandardMaterial({ color: '#2b313a', roughness: 0.6 }));
+    leaf.position.set(side * 0.65, 0.1, 0);
+    leaf.userData.side = side;
+    door.add(leaf);
+    return leaf;
+  });
+  door.add(shaft, glow);
+  door.position.set(TRAP_DOOR.x, 0, TRAP_DOOR.z);
+  scene.add(door);
+  batRun.door = { group: door, leaves, glow };
+}
+// Called when Wayne Manor is clicked: drive back to the trap door and go down into the Batcave.
+function batmanHome() {
+  if (!batRun.rider || batRun.phase === 'home' || batRun.phase === 'sink') return;
+  const here = batRun.rider.position;
+  batRun.path = [{ x: here.x, z: here.z }, ...routeBetween(nearestNode(here.x, here.z), nearestNode(TRAP_DOOR.x, TRAP_DOOR.z)), { x: TRAP_DOOR.x, z: TRAP_DOOR.z }];
+  batRun.leg = 0;
+  batRun.travelled = 0;
+  batRun.target = null;
+  batRun.homeward = true;
+  batRun.phase = 'drive';
+}
+// Called when a website or landmark is selected.
+function sendBatman(x, z) {
+  batRun.homeward = false;
+  if (!batRun.rider) return;
+  const target = nearestNode(x, z);
+  if (batRun.phase === 'home') {
+    batRun.path = routeBetween(nearestNode(TRAP_DOOR.x, TRAP_DOOR.z), target);
+    batRun.path.unshift({ x: TRAP_DOOR.x, z: TRAP_DOOR.z });
+    batRun.phase = 'rise';
+    batRun.clock = 0;
+  } else {
+    const here = batRun.rider.position;
+    batRun.path = [{ x: here.x, z: here.z }, ...routeBetween(nearestNode(here.x, here.z), target)];
+    batRun.phase = 'drive';
+  }
+  batRun.leg = 0;
+  batRun.travelled = 0;
+  batRun.target = { x, z };
+}
+const BAT_SPEED = 24; // units per second: about 200 km/h at road scale
+const ROAD_Y = 0.08;
+let lastBatTime = performance.now() / 1000;
+function updateBatRun(time) {
+  const dt = Math.min(0.5, time - lastBatTime); // generous cap: keeps real-time pace even when frames are slow
+  lastBatTime = time;
+  const { rider, door } = batRun;
+  if (!rider || batRun.phase === 'home') return;
+  batRun.clock += dt;
+  if (batRun.phase === 'sink') {
+    const t = batRun.clock;
+    const open = t < 0.5 ? t / 0.5 : t < 1.6 ? 1 : Math.max(0, 1 - (t - 1.6) / 0.5);
+    door.leaves.forEach((leaf) => { leaf.position.x = leaf.userData.side * (0.65 + open * 1.3); });
+    door.glow.intensity = open * 6;
+    const drop = Math.min(1, Math.max(0, (t - 0.5) / 1.0));
+    rider.position.set(TRAP_DOOR.x, ROAD_Y - drop * 2.6, TRAP_DOOR.z);
+    rider.visible = drop < 1;
+    if (t >= 2.1) batRun.phase = 'home';
+    return;
+  }
+  if (batRun.phase === 'rise') {
+    // 0-0.6 s doors slide open, 0.6-1.8 s he rises out of the shaft, 1.8-2.4 s doors close behind him.
+    const t = batRun.clock;
+    const open = t < 0.6 ? t / 0.6 : t < 1.8 ? 1 : Math.max(0, 1 - (t - 1.8) / 0.6);
+    door.leaves.forEach((leaf) => { leaf.position.x = leaf.userData.side * (0.65 + open * 1.3); });
+    door.glow.intensity = open * 6;
+    rider.visible = t > 0.5;
+    const lift = Math.min(1, Math.max(0, (t - 0.6) / 1.2));
+    rider.position.set(TRAP_DOOR.x, ROAD_Y - 2.6 + lift * 2.6, TRAP_DOOR.z);
+    const next = batRun.path[1] ?? batRun.path[0];
+    rider.rotation.y = Math.atan2(-(next.z - TRAP_DOOR.z), next.x - TRAP_DOOR.x);
+    if (t >= 1.8) batRun.phase = 'drive';
+    return;
+  }
+  if (door && batRun.clock < 3) {
+    const open = Math.max(0, 1 - (batRun.clock - 1.8) / 0.6);
+    door.leaves.forEach((leaf) => { leaf.position.x = leaf.userData.side * (0.65 + open * 1.3); });
+    door.glow.intensity = open * 6;
+  }
+  if (batRun.phase !== 'drive') return;
+  // Drive along the route: advance the distance travelled, find the current leg, face along it.
+  batRun.travelled += BAT_SPEED * dt;
+  const path = batRun.path;
+  while (batRun.leg < path.length - 1) {
+    const a = path[batRun.leg], b = path[batRun.leg + 1];
+    const legLength = Math.hypot(b.x - a.x, b.z - a.z);
+    if (batRun.travelled < legLength) {
+      const f = batRun.travelled / legLength;
+      rider.position.set(a.x + (b.x - a.x) * f, ROAD_Y + Math.abs(Math.sin(time * 18)) * 0.05, a.z + (b.z - a.z) * f);
+      const heading = Math.atan2(-(b.z - a.z), b.x - a.x);
+      let turn = heading - rider.rotation.y;
+      turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+      rider.rotation.y += turn * Math.min(1, dt * 12); // smooth into corners
+      return;
+    }
+    batRun.travelled -= legLength;
+    batRun.leg++;
+  }
+  // Home: sink back through the trap door (doors open, he drops into the shaft, doors close).
+  if (batRun.homeward) {
+    batRun.phase = 'sink';
+    batRun.clock = 0;
+    return;
+  }
+  // Arrived: park on the kerb, facing the building.
+  const end = path[path.length - 1];
+  rider.position.set(end.x, ROAD_Y, end.z);
+  if (batRun.target) rider.rotation.y = Math.atan2(-(batRun.target.z - end.z), batRun.target.x - end.x);
+  batRun.phase = 'parked';
+}
+
+// ---- Pedestrians --------------------------------------------------------------------------------------------------
+// Tai's ambient sprite sheet (models/everything-else/gotham_ambient_sprites.png: rows Commuter, Hooded, Porter, Bat;
+// four 128 px walk frames each) brings ~70 people to the sidewalks. They walk the street network (on the land side of
+// each street, on the deck of bridges), turn at random at corners and steer away from breached skyscrapers. Anyone who
+// gets within DANGER of one breaks into a run away from it until they are SAFE.
+const NPC_COUNT = 70;
+const NPC_HEIGHT = 1.7;
+const NPC_WALK = 1.3; // units per second
+const NPC_RUN = 4.8;
+const DANGER = 8; // a breached tower's reach
+const SAFE = 11; // running stops beyond this
+const npcs = [];
+let breachedTowerSpots = [];
+function syncBreachedTowers() {
+  breachedTowerSpots = accounts.filter((account) => account.status === 'breached' && account.slot >= 0).map((account) => slots[account.slot]);
+}
+const nearestDanger = (x, z) => breachedTowerSpots.reduce((best, spot) => Math.min(best, Math.hypot(spot.x - x, spot.z - z)), Infinity);
+// Where along a street a pedestrian walks: off the street's centreline toward the land side (on bridges, the deck).
+function sidewalkOffset(a, b) {
+  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  const nx = -(b.z - a.z) / len, nz = (b.x - a.x) / len;
+  const bridge = a.key.startsWith('b') && b.key.startsWith('b');
+  if (bridge) return { nx, nz, d: 1.1, y: 0.12 };
+  const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
+  const side = isOnLand(mx + nx * 1.75, mz + nz * 1.75, 0.2) ? 1 : -1;
+  return { nx, nz, d: 1.75 * side, y: 0.23 };
+}
+async function spawnPedestrians() {
+  const atlas = await new THREE.TextureLoader().loadAsync('./models/everything-else/gotham_ambient_sprites.png').catch(() => null);
+  if (!atlas) return;
+  atlas.colorSpace = THREE.SRGBColorSpace;
+  atlas.magFilter = THREE.NearestFilter;
+  // frames[kind][frame][mirrored]: the art faces screen-right; mirrored copies face left.
+  const frames = [0, 1, 2].map((row) => [0, 1, 2, 3].map((col) => [false, true].map((mirror) => {
+    const texture = atlas.clone();
+    texture.repeat.set(mirror ? -0.25 : 0.25, 0.25);
+    texture.offset.set((mirror ? col + 1 : col) * 0.25, 1 - (row + 1) * 0.25);
+    texture.needsUpdate = true;
+    return texture;
+  })));
+  const walkable = [...roadGraph.values()].filter((n) => n.links.size);
+  for (let i = 0; i < NPC_COUNT; i++) {
+    const from = walkable[Math.floor(Math.random() * walkable.length)];
+    const to = roadGraph.get([...from.links.keys()][Math.floor(Math.random() * from.links.size)]);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: frames[i % 3][0][0], transparent: true, alphaTest: 0.35 }));
+    sprite.scale.set(NPC_HEIGHT, NPC_HEIGHT, 1);
+    sprite.center.set(0.5, 0.1); // feet on the pavement
+    scene.add(sprite);
+    npcs.push({ sprite, frames: frames[i % 3], from, to, walk: sidewalkOffset(from, to), t: Math.random(), running: false, step: Math.random() * 4 });
+  }
+}
+// Next street at a corner: away from the nearest breached tower when running; otherwise a random one that doesn't lead
+// toward one (never straight back unless it's a dead end).
+function nextStreet(npc) {
+  const here = npc.to;
+  let options = [...here.links.keys()].map((key) => roadGraph.get(key)).filter((n) => n !== npc.from);
+  if (!options.length) options = [npc.from];
+  if (npc.running) return options.reduce((best, n) => (nearestDanger(n.x, n.z) > nearestDanger(best.x, best.z) ? n : best));
+  const safe = options.filter((n) => nearestDanger(n.x, n.z) > DANGER);
+  const pool = safe.length ? safe : options;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+const cameraRight = new THREE.Vector3();
+let lastNpcTime = performance.now() / 1000;
+function updatePedestrians(time) {
+  const dt = Math.min(0.5, time - lastNpcTime);
+  lastNpcTime = time;
+  if (!npcs.length) return;
+  cameraRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+  for (const npc of npcs) {
+    let { from: a, to: b } = npc;
+    let len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    const x0 = a.x + (b.x - a.x) * npc.t, z0 = a.z + (b.z - a.z) * npc.t;
+    const danger = nearestDanger(x0, z0);
+    if (!npc.running && danger < DANGER) {
+      npc.running = true;
+      // Turn round if this street heads toward the danger.
+      if (nearestDanger(b.x, b.z) < nearestDanger(a.x, a.z)) { [npc.from, npc.to] = [b, a]; npc.t = 1 - npc.t; npc.walk = sidewalkOffset(npc.to === a ? b : a, npc.to); [a, b] = [npc.from, npc.to]; }
+    } else if (npc.running && danger > SAFE) {
+      npc.running = false;
+    }
+    npc.t += ((npc.running ? NPC_RUN : NPC_WALK) * dt) / len;
+    while (npc.t >= 1) {
+      const next = nextStreet(npc);
+      npc.t = (npc.t - 1) * len;
+      npc.from = npc.to;
+      npc.to = next;
+      npc.walk = sidewalkOffset(npc.from, npc.to);
+      [a, b] = [npc.from, npc.to];
+      len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+      npc.t /= len;
+    }
+    const { nx, nz, d, y } = npc.walk;
+    npc.sprite.position.set(a.x + (b.x - a.x) * npc.t + nx * d, y, a.z + (b.z - a.z) * npc.t + nz * d);
+    npc.step += dt * (npc.running ? 14 : 6);
+    const mirrored = (b.x - a.x) * cameraRight.x + (b.z - a.z) * cameraRight.z < 0; // heading screen-left
+    npc.sprite.material.map = npc.frames[Math.floor(npc.step) % 4][mirrored ? 1 : 0];
+  }
+}
+
+// ---- Traffic --------------------------------------------------------------------------------------------------------
+// Tai's civilian cars (hatchback, two sedans) and a few GCPD cruisers drive the street network in the right-hand lane,
+// turning at random at corners (no U-turns unless it's a dead end) and easing their heading round each turn. A car stops
+// for a pedestrian or a car just ahead; after waiting STUCK seconds behind cars (a jam at a crossing) it turns round.
+const CAR_COUNT = 28;
+const COP_COUNT = 4;
+const CAR_SPEED = 3.6;
+const LANE = 0.7; // off the centreline
+const STUCK = 4;
+const cars = [];
+async function spawnTraffic() {
+  const load = (file) => loadModel(`./models/everything-else/${file}.glb`).catch(() => null);
+  const [civilian, police] = await Promise.all([load('gotham_civilian_cars'), load('gotham_police_cruiser')]);
+  const models = [...(civilian?.children ?? []).map((car) => [car, 1]), ...(police?.children ?? []).map((car) => [car, 0.55])];
+  if (!models.length) return;
+  const walkable = [...roadGraph.values()].filter((n) => n.links.size);
+  for (let i = 0; i < CAR_COUNT + COP_COUNT; i++) {
+    const [source, scale] = i < CAR_COUNT ? models[i % Math.max(1, models.length - 1)] : models[models.length - 1];
+    const body = source.clone(true);
+    const centre = new THREE.Box3().setFromObject(source).getCenter(new THREE.Vector3());
+    body.position.set(-centre.x, 0, -centre.z); // the kit's cars stand side by side; centre each one
+    const car = new THREE.Group();
+    car.add(body);
+    car.scale.setScalar(scale);
+    // The kit's own beacon lights are wide point lights that tint whole streets purple; the flashing below replaces them.
+    car.traverse((node) => { if (node.isMesh) node.castShadow = true; if (node.isLight) node.visible = false; });
+    // GCPD light bars: unlit red and blue lenses that flash in turn, and a small light washing the street below.
+    let beacons = null;
+    if (i >= CAR_COUNT) {
+      beacons = { red: [], blue: [], light: new THREE.PointLight('#ff2a2a', 0, 9, 1.4) };
+      body.traverse((node) => {
+        const colour = /red_lens/i.test(node.name) ? 'red' : /blue_lens/i.test(node.name) ? 'blue' : null;
+        if (colour) node.traverse((mesh) => { if (mesh.isMesh) { mesh.material = new THREE.MeshBasicMaterial(); beacons[colour].push(mesh.material); } });
+      });
+      beacons.light.position.y = 5; // well above the roof (car frame, before the 0.55 scale) so it lights the street, not the paint
+      car.add(beacons.light);
+    }
+    scene.add(car);
+    const from = walkable[Math.floor(Math.random() * walkable.length)];
+    const to = roadGraph.get([...from.links.keys()][Math.floor(Math.random() * from.links.size)]);
+    cars.push({ car, from, to, t: Math.random(), yaw: null, speed: CAR_SPEED * (0.8 + Math.random() * 0.4), wait: 0, beacons, flash: Math.random() * 2 });
+  }
+}
+let lastCarTime = performance.now() / 1000;
+function updateTraffic(time) {
+  const dt = Math.min(0.5, time - lastCarTime);
+  lastCarTime = time;
+  for (const c of cars) {
+    if (c.beacons) {
+      const redOn = (time * 3 + c.flash) % 2 < 1;
+      c.beacons.red.forEach((m) => m.color.set(redOn ? '#ff2626' : '#3a0808'));
+      c.beacons.blue.forEach((m) => m.color.set(redOn ? '#081040' : '#2f6bff'));
+      c.beacons.light.color.set(redOn ? '#ff2a2a' : '#2f6bff');
+      c.beacons.light.intensity = 5;
+    }
+    let len = Math.hypot(c.to.x - c.from.x, c.to.z - c.from.z) || 1;
+    // Anything within reach ahead of the car and close to its line?
+    const here = c.car.position, hx = (c.to.x - c.from.x) / len, hz = (c.to.z - c.from.z) / len;
+    const ahead = (p, reach, width) => {
+      const rx = p.x - here.x, rz = p.z - here.z;
+      const along = rx * hx + rz * hz;
+      return along > 0.2 && along < reach && Math.abs(rx * hz - rz * hx) < width;
+    };
+    const carAhead = cars.some((o) => o !== c && ahead(o.car.position, 2.6, 0.9));
+    const personAhead = npcs.some((npc) => ahead(npc.sprite.position, 2.2, 0.8));
+    c.wait = carAhead ? c.wait + dt : 0;
+    if (c.wait > STUCK) { [c.from, c.to] = [c.to, c.from]; c.t = 1 - c.t; c.wait = 0; continue; } // U-turn out of the jam
+    if (carAhead || personAhead) continue;
+    c.t += (c.speed * dt) / len;
+    while (c.t >= 1) {
+      let options = [...c.to.links.keys()].map((key) => roadGraph.get(key)).filter((n) => n !== c.from);
+      if (!options.length) options = [c.from];
+      const next = options[Math.floor(Math.random() * options.length)];
+      c.t = ((c.t - 1) * len) / (Math.hypot(next.x - c.to.x, next.z - c.to.z) || 1);
+      [c.from, c.to] = [c.to, next];
+      len = Math.hypot(c.to.x - c.from.x, c.to.z - c.from.z) || 1;
+    }
+    const dx = (c.to.x - c.from.x) / len, dz = (c.to.z - c.from.z) / len;
+    const bridge = c.from.key.startsWith('b') && c.to.key.startsWith('b');
+    // Right-hand lane. Shoreline streets are widened to two lanes, except by beaches and working waterfronts, where the
+    // street is only its land-side half and both directions share it.
+    const mx = (c.from.x + c.to.x) / 2, mz = (c.from.z + c.to.z) / 2;
+    const rightLand = isOnLand(mx - dz, mz + dx), leftLand = isOnLand(mx + dz, mz - dx);
+    const lane = bridge || (rightLand && leftLand) || widenedShore.has(`${mx},${mz}`) ? LANE : rightLand ? 0.75 : -0.75;
+    c.car.position.set(c.from.x + dx * len * c.t - dz * lane, bridge ? 0.12 : ROAD_Y, c.from.z + dz * len * c.t + dx * lane);
+    const target = Math.atan2(-dx, -dz); // the cars' noses point -Z
+    if (c.yaw === null) c.yaw = target;
+    const turn = Math.atan2(Math.sin(target - c.yaw), Math.cos(target - c.yaw));
+    c.yaw += turn * Math.min(1, dt * 6);
+    c.car.rotation.y = c.yaw;
+  }
 }
 
 function finishInitialLoad() {
   if (!environmentReady || !accountModelsReady) return;
+  if (!npcs.length) spawnPedestrians();
+  if (!cars.length) spawnTraffic();
+  if (!batRun.rider) prepareBatRun();
   placeWayneManor();
   placeBatSignal();
   launchShips();
@@ -782,7 +1227,9 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
     // Daniel's *_8bit landmarks are modeled in meters: true road scale, shrunk only to fit the block, never stretched.
     const scale = landmark.file.endsWith('_8bit.glb')
       ? Math.min(UNITS_PER_METER, (block.width - 1.2) / size.x, (block.depth - 1.2) / size.z)
-      : [(block.width - 1.2) / size.x, landmark.height / size.y, (block.depth - 1.2) / size.z];
+      : landmark.name === 'Wayne Tower'
+        ? landmark.height / size.y // even scale: true proportions, landmark.height tall
+        : [(block.width - 1.2) / size.x, landmark.height / size.y, (block.depth - 1.2) / size.z];
     const root = addPlacedModel(source, [block.x, 0.23, block.z], scale);
     flickerWindows(root);
     root.userData.landmark = landmark.name;
@@ -1018,6 +1465,8 @@ function renderDirectory() {
 }
 
 function renderOverview() {
+  syncBatSignal();
+  syncBreachedTowers();
   if (document.querySelector('#city-stats').hidden) showCityMood();
   document.querySelector('#clear-count').textContent = String(accounts.filter((account) => account.status === 'clear').length).padStart(2, '0');
   document.querySelector('#breached-count').textContent = String(accounts.filter((account) => account.status === 'breached').length).padStart(2, '0');
@@ -1152,6 +1601,7 @@ function closeDeck() {
   document.querySelector('#bat-status').focus();
 }
 document.querySelector('#bat-status').addEventListener('click', openDeck);
+document.querySelector('#nav-deck').addEventListener('click', openDeck);
 document.querySelector('#deck-close').addEventListener('click', closeDeck);
 document.querySelector('#deck-prev').addEventListener('click', () => { activeDeckSlide = Math.max(0, activeDeckSlide - 1); renderDeck(); });
 document.querySelector('#deck-next').addEventListener('click', () => { activeDeckSlide = activeDeckSlide === 3 ? 0 : activeDeckSlide + 1; renderDeck(); });
@@ -1361,6 +1811,7 @@ function showMissionBoard({ focus = true } = {}) {
     card.querySelector('.mission-complete').addEventListener('click', () => {
       if (done) delete progress[task.key]; else progress[task.key] = new Date().toISOString();
       const saved = saveProgress(storage, scope, progress);
+      syncBatSignal();
       showMissionBoard({ focus: false });
       document.querySelector('.mission-announcement').textContent = `${task.account}: ${done ? 'mission reopened' : 'marked complete'}.${saved ? '' : ' Browser storage is unavailable; progress lasts for this session.'}`;
       document.querySelector(`.mission-filters [data-filter="${missionFilter}"]`).focus();
@@ -1549,6 +2000,7 @@ function selectAccount(id) {
   if (root) {
     const slot = slots[accountsById.get(id).slot];
     focusCamera(slot.x, 5, slot.z, 850, null, FOCUS_ZOOM); // mid-height of a road-scale tower
+    sendBatman(slot.x, slot.z);
   }
 }
 
@@ -1873,7 +2325,9 @@ renderer.domElement.addEventListener('pointerup', (event) => {
     showAccountReport(node.userData.accountId);
   } else if (node?.userData.landmark) {
     const name = node.userData.landmark;
-    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham', 'Gotham Bank': 'bank', 'GCPD Headquarters': 'gcpd', 'Cobblepot Manor': 'cobblepot', 'Blackgate Penitentiary': 'blackgate', 'Elliot Memorial': 'elliot', 'Wayne Manor': 'wayne' }[name];
+    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham', 'Gotham Bank': 'bank', 'GCPD Headquarters': 'gcpd', 'Cobblepot Manor': 'cobblepot', 'Blackgate Penitentiary': 'blackgate', 'Elliot Memorial': 'elliot' }[name];
+    if (name === 'Wayne Manor') { batmanHome(); return; }
+    { const box = new THREE.Box3().setFromObject(node); sendBatman((box.min.x + box.max.x) / 2, (box.min.z + box.max.z) / 2); }
     if (key) landmarkReports[key]();
     else openPhone({ eyebrow: name.toUpperCase(), title: name, subtitle: 'City-wide account overview', cards: [['ACCOUNTS MONITORED', accounts.length, 'total']], counts: countStatuses(accounts), listTitle: 'ACCOUNT STATUS', rows: accounts.map(a => [a.name, a.district, accountBadge(a), a.status]), note: 'Landmark model pending. No match means no known match in this source.', focus: landmarks.find(l => l.name === name) ? blocks[landmarks.find(l => l.name === name).block] : blocks[0] });
   }
@@ -1899,6 +2353,9 @@ resizeScene();
 function animate() {
   city.update(performance.now() / 1000);
   updateShips(performance.now() / 1000);
+  updateBatRun(performance.now() / 1000);
+  updatePedestrians(performance.now() / 1000);
+  updateTraffic(performance.now() / 1000);
   controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
