@@ -10,9 +10,11 @@ import { CITY } from "./demo-city.js";
  *   breaches: string[],       // names of breaches that hit this service
  *   foundIn: Array<"inbox" | "breach">,
  *   firstSeen: string | null, // earliest inbox email date (YYYY-MM-DD), if found in the inbox
+ *   lastSeen: string | null,  // latest sign-up-style email from it (YYYY-MM-DD)
+ *   signInWithGoogle: boolean, // joined with "Sign in with Google" (no separate password to leak)
  *   serviceBreaches: ServiceBreach[], // every known breach OF THIS SERVICE, even if your email wasn't in it (newest first)
  * }} Account
- * @typedef {{ name: string, date: string, exposedData: string[], records: number | null }} ServiceBreach
+ * @typedef {{ name: string, date: string, exposedData: string[], records: number | null, industry?: string | null }} ServiceBreach
  * @typedef {{
  *   id: string,
  *   label: string,
@@ -71,11 +73,11 @@ export function lookupDomains(domains) {
  * serviceMap: Map(base domain -> ServiceBreach[]) from db.js serviceBreaches().
  */
 export function toAccounts(breaches, inbox = [], serviceMap = new Map()) {
-  const byDomain = new Map(inbox.map((a) => [serviceKey(a.domain), { ...a, breached: false, breaches: [], foundIn: ["inbox"] }]));
+  const byDomain = new Map(inbox.map((a) => [serviceKey(a.domain), { lastSeen: a.firstSeen, signInWithGoogle: false, ...a, breached: false, breaches: [], foundIn: ["inbox"] }]));
   for (const b of breaches) {
     if (!b.domain) continue; // e.g. stealer-log dumps aren't a service account
     let a = byDomain.get(serviceKey(b.domain));
-    if (!a) byDomain.set(serviceKey(b.domain), (a = { name: b.name, domain: b.domain, firstSeen: null, breached: false, breaches: [], foundIn: ["breach"] }));
+    if (!a) byDomain.set(serviceKey(b.domain), (a = { name: b.name, domain: b.domain, firstSeen: null, lastSeen: null, signInWithGoogle: false, breached: false, breaches: [], foundIn: ["breach"] }));
     if (!a.foundIn.includes("breach")) a.foundIn.push("breach");
     a.breached = true;
     a.breaches.push(b.name);
@@ -93,7 +95,7 @@ export function toAccounts(breaches, inbox = [], serviceMap = new Map()) {
 export function nextSteps(service, exposedData = [], mine = true) {
   const has = (re) => exposedData.some((d) => re.test(d));
   const steps = [];
-  if (!mine) steps.push(`Your email wasn't found in this leak, but if you had a ${service} account back then, change that password to be safe.`);
+  if (!mine) steps.push(`Your email wasn't found in this leak, but if you had ${/^[aeiou]/i.test(service) ? "an" : "a"} ${service} account back then, change that password to be safe.`);
   else if (has(/password/i)) steps.push(`Change your ${service} password, and the password on any other site where you reused it.`);
   else steps.push(`Review your ${service} account for activity you don't recognize.`);
   steps.push(`Turn on two-step verification (2FA) for ${service}.`);
@@ -104,6 +106,74 @@ export function nextSteps(service, exposedData = [], mine = true) {
   if (has(/credit card|bank|payment/i)) steps.push("Check your card and bank statements, and ask your bank about a replacement card.");
   if (has(/security question/i)) steps.push("Change any security questions that used the same answers elsewhere.");
   return steps;
+}
+
+const SENSITIVE = /password|phone|date of birth|dates of birth|physical address|social security|government|credit card|bank|security question/i;
+const yearsAgo = (date, now) => (now - Date.parse(date)) / (365.25 * 864e5);
+
+/**
+ * Every dashboard stat from one AccountCheck, so the frontend never re-derives them. Works offline on fixtures.
+ * Building map: Wayne Tower = counts + exposureScore, Arkham = breachedWhileMember, Ace Chemicals = exposedData + largestBreach,
+ * Gotham Bank = footprintByYear / signInWithGoogle / dormant, GCPD = fixFirst, Cobblepot = industries (+ /api/news).
+ */
+export function summarize(check, now = Date.now()) {
+  const accounts = check.accounts ?? [];
+  const mine = accounts.filter((a) => a.breached);
+  const service = accounts.filter((a) => !a.breached && a.serviceBreaches?.length);
+
+  // "Breached while you were a member": the service was hit after your first sign-up email from it.
+  const breachedWhileMember = service.flatMap((a) =>
+    a.serviceBreaches.filter((b) => a.firstSeen && b.date >= a.firstSeen).slice(0, 1).map((b) => ({ name: a.name, domain: a.domain, breach: b.name, date: b.date, exposedData: b.exposedData })));
+
+  // ponytail: transparent heuristic, not a standard. Your-data breaches weigh most (more if passwords or identity data,
+  // more if recent), then service breaches while you were a member, then other service breaches. Capped at 100.
+  let score = 0;
+  for (const b of check.breaches ?? []) {
+    const age = b.date ? yearsAgo(b.date, now) : 10;
+    score += (15 + (b.exposedData.some((d) => /password/i.test(d)) ? 15 : 0) + (b.exposedData.some((d) => SENSITIVE.test(d) && !/password/i.test(d)) ? 10 : 0)) * (age <= 2 ? 1 : age <= 5 ? 0.7 : 0.4);
+  }
+  score += breachedWhileMember.length * 6 + (service.length - breachedWhileMember.length) * 2;
+
+  const exposed = new Map();
+  for (const b of check.breaches ?? []) for (const d of b.exposedData) exposed.set(d, (exposed.get(d) ?? 0) + 1);
+
+  const dated = (check.breaches ?? []).filter((b) => b.date).sort((x, y) => x.date.localeCompare(y.date));
+  const allBreaches = accounts.flatMap((a) => (a.serviceBreaches ?? []).map((b) => ({ ...b, account: a.name })));
+  const largest = allBreaches.filter((b) => b.records).sort((x, y) => y.records - x.records)[0];
+
+  const priority = (b) => (b.exposedData.some((d) => /password/i.test(d)) ? 2 : 0) + (b.exposedData.some((d) => SENSITIVE.test(d)) ? 1 : 0);
+  const fixFirst = [
+    ...(check.breaches ?? []).filter((b) => b.domain).sort((x, y) => priority(y) - priority(x) || (y.date ?? "").localeCompare(x.date ?? ""))
+      .map((b) => ({ name: accounts.find((a) => a.domain === b.domain)?.name ?? b.name, domain: b.domain, why: `Your data was in the ${b.name} breach${b.date ? ` (${b.date.slice(0, 4)})` : ""}`, steps: nextSteps(b.name, b.exposedData, true) })),
+    ...breachedWhileMember.map((w) => ({ name: w.name, domain: w.domain, why: `${w.name} was breached in ${w.date.slice(0, 4)}, after you joined`, steps: nextSteps(w.name, w.exposedData, false) })),
+  ];
+
+  const byYear = new Map();
+  for (const a of accounts) if (a.firstSeen) byYear.set(a.firstSeen.slice(0, 4), (byYear.get(a.firstSeen.slice(0, 4)) ?? 0) + 1);
+  const industries = new Map();
+  for (const a of [...mine, ...service]) {
+    const ind = a.serviceBreaches?.[0]?.industry;
+    if (ind) industries.set(ind, (industries.get(ind) ?? 0) + 1);
+  }
+
+  return {
+    accounts: accounts.length,
+    yourDataBreached: mine.length,
+    serviceBreached: service.length,
+    noKnownBreach: accounts.length - mine.length - service.length,
+    exposureScore: Math.min(100, Math.round(score)),
+    exposedData: [...exposed].map(([type, breaches]) => ({ type, breaches })).sort((x, y) => y.breaches - x.breaches),
+    oldestLeak: dated[0] ? { name: dated[0].name, date: dated[0].date } : null,
+    newestLeak: dated.at(-1) ? { name: dated.at(-1).name, date: dated.at(-1).date } : null,
+    largestBreach: largest ? { name: largest.name, account: largest.account, records: largest.records, date: largest.date } : null,
+    breachedWhileMember,
+    fixFirst,
+    footprintByYear: [...byYear].map(([year, n]) => ({ year: Number(year), accounts: n })).sort((x, y) => x.year - y.year),
+    signInWithGoogle: accounts.filter((a) => a.signInWithGoogle).length,
+    // Approximate: only sign-up-style emails are scanned, so "no such email in 2+ years" is a hint, not proof of disuse.
+    dormant: accounts.filter((a) => a.lastSeen && yearsAgo(a.lastSeen, now) > 2).length,
+    industries: [...industries].map(([industry, n]) => ({ industry, accounts: n })).sort((x, y) => y.accounts - x.accounts),
+  };
 }
 
 // Fictional services. Categories only: never leaked values.

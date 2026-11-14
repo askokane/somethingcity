@@ -24,9 +24,11 @@ Given an email the user has **proven they own**, the checker returns every servi
     breaches: string[];                   // breach names that hit this service
     foundIn: Array<"inbox" | "breach">;   // how we know the account exists
     firstSeen: string | null;             // earliest sign-up email, YYYY-MM-DD
+    lastSeen: string | null;              // latest sign-up-style email (not all mail), YYYY-MM-DD
+    signInWithGoogle: boolean;            // joined via "Sign in with Google": no separate password to leak
     serviceBreaches: Array<{              // every known breach OF THIS SERVICE, newest first,
       name: string; date: string;         //   even if this user's email wasn't in it
-      exposedData: string[]; records: number | null;
+      exposedData: string[]; records: number | null; industry: string | null;
     }>;
   };
   ```
@@ -43,6 +45,42 @@ Given an email the user has **proven they own**, the checker returns every servi
 The overall `status: "unknown"` (check unavailable) still applies to the whole result, as before.
 
 `accounts` comes from the inbox scan only if the user signed in with Google and allowed Gmail access. Otherwise it lists only the breached services.
+
+## Dashboard stats and news
+
+**`summarize(check)`** (in `checker.js`) turns any `AccountCheck`, live or demo, into every dashboard number. It works offline.
+
+| Field | Example (`city@demo.test`) | Suggested building |
+|---|---|---|
+| `accounts`, `yourDataBreached`, `serviceBreached`, `noKnownBreach` | 20 / 2 / 9 / 9 | Wayne Tower |
+| `exposureScore` (0–100) | 72 | Wayne Tower |
+| `breachedWhileMember`: amber services hit *after* your first sign-up email, so you very likely had an account then | Adobe 2013, Canva 2019… | Arkham Asylum |
+| `exposedData`: data types across your breaches, most common first | Email addresses ×2, Passwords ×1… | Ace Chemicals |
+| `largestBreach`, `oldestLeak`, `newestLeak` | Wattpad, 268M records | Ace Chemicals |
+| `footprintByYear`: new accounts per year | 2011: 1, 2012: 2… | Gotham Bank |
+| `signInWithGoogle`, `dormant` | 7 / 7 | Gotham Bank |
+| `fixFirst`: ranked to-dos (password leaks, then identity data, then newest), each with `why` and `steps` | MyFitnessPal first | GCPD HQ |
+| `industries`: industries of your breached and amber services | IT 5, Education 2… | Cobblepot Manor |
+
+Caveats to show near these numbers:
+- **`exposureScore`** is our own transparent heuristic, not a standard. Breaches with your data weigh most (more if passwords or identity data leaked, more if recent), then service breaches after you joined, then other service breaches. It's capped at 100.
+- **`dormant`** means no sign-up-style email from that service in 2+ years. The scan doesn't read all mail, so it's a hint, not proof the account is unused.
+
+**Breach news (Cobblepot Manor):** `GET /api/news?limit=10` returns:
+
+```js
+{
+  recent:   [/* newest breaches to become public (by addedDate) */],
+  biggest:  [/* largest breaches of named services ever, by records */],
+  thisYear: { year: 2026, breaches: 88, records: 293558300 },
+  source:   "Tiger Data" // or "XposedOrNot catalog" if the database is unavailable
+}
+// each item: { name, domain, date, addedDate, industry, records, exposedData, description }
+```
+
+`description` is a plain-text paragraph, ready to show as the headline blurb. It's public breach data, not personal.
+
+**Your breaches on the world timeline:** `POST /api/timeline/mine` with `{ domains: result.accounts.map((a) => a.domain) }` returns the yearly Tiger Data timeline with `yours: ["Adobe", ...]` marked per year. It's a POST so the account list stays out of URLs.
 
 ## Using it from the frontend
 
@@ -136,7 +174,8 @@ Without `RESEND_API_KEY`, codes print in the server console, which is fine for t
 1. Create a free service at [Tiger Data](https://www.tigerdata.com/) and copy its connection string into `DATABASE_URL`.
 2. Run `npm run load-timeline`. It creates a `breaches` hypertable and loads XposedOrNot's public catalog of about 800 breaches, with an indexed `base_domain` column. It's safe to re-run.
 3. It powers two things:
-   - `GET /api/timeline` returns breaches and exposed records per year, using `time_bucket`.
+   - `GET /api/timeline` returns breaches and exposed records per year, using `time_bucket`. `POST /api/timeline/mine` adds the user's own breaches per year.
+   - `GET /api/news` returns recent breaches, the biggest breaches and this year's totals.
    - **Every live check** joins the user's accounts against the hypertable by domain to fill in `serviceBreaches`. If Tiger Data is down or unset, it falls back to the in-memory catalog, so checks never fail because of it.
 
 ### Gemini (breach explanations)

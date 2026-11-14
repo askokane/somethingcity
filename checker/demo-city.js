@@ -30,102 +30,142 @@ export const CITY = {
   {
    "name": "LinkedIn",
    "domain": "linkedin.com",
-   "firstSeen": "2014-09-02"
+   "firstSeen": "2014-09-02",
+   "lastSeen": "2026-10-30",
+   "signInWithGoogle": false
   },
   {
    "name": "MyFitnessPal",
    "domain": "myfitnesspal.com",
-   "firstSeen": "2016-01-11"
+   "firstSeen": "2016-01-11",
+   "lastSeen": "2018-03-02",
+   "signInWithGoogle": false
   },
   {
    "name": "Adobe",
    "domain": "adobe.com",
-   "firstSeen": "2012-05-20"
+   "firstSeen": "2012-05-20",
+   "lastSeen": "2025-02-11",
+   "signInWithGoogle": false
   },
   {
    "name": "Canva",
    "domain": "canva.com",
-   "firstSeen": "2018-08-14"
+   "firstSeen": "2018-08-14",
+   "lastSeen": "2026-09-29",
+   "signInWithGoogle": true
   },
   {
    "name": "Chegg",
    "domain": "chegg.com",
-   "firstSeen": "2017-01-09"
+   "firstSeen": "2017-01-09",
+   "lastSeen": "2019-05-14",
+   "signInWithGoogle": false
   },
   {
    "name": "Dropbox",
    "domain": "dropbox.com",
-   "firstSeen": "2012-03-03"
+   "firstSeen": "2012-03-03",
+   "lastSeen": "2013-01-20",
+   "signInWithGoogle": false
   },
   {
    "name": "Zynga",
    "domain": "zynga.com",
-   "firstSeen": "2013-06-21"
+   "firstSeen": "2013-06-21",
+   "lastSeen": "2014-02-08",
+   "signInWithGoogle": false
   },
   {
    "name": "Wattpad",
    "domain": "wattpad.com",
-   "firstSeen": "2019-02-17"
+   "firstSeen": "2019-02-17",
+   "lastSeen": "2021-06-30",
+   "signInWithGoogle": false
   },
   {
    "name": "Deezer",
    "domain": "deezer.com",
-   "firstSeen": "2018-10-05"
+   "firstSeen": "2018-10-05",
+   "lastSeen": "2019-01-12",
+   "signInWithGoogle": false
   },
   {
    "name": "Twitter",
    "domain": "twitter.com",
-   "firstSeen": "2015-04-30"
+   "firstSeen": "2015-04-30",
+   "lastSeen": "2024-07-19",
+   "signInWithGoogle": false
   },
   {
    "name": "Spotify",
    "domain": "spotify.com",
-   "firstSeen": "2016-07-19"
+   "firstSeen": "2016-07-19",
+   "lastSeen": "2026-11-01",
+   "signInWithGoogle": true
   },
   {
    "name": "GitHub",
    "domain": "github.com",
-   "firstSeen": "2019-09-01"
+   "firstSeen": "2019-09-01",
+   "lastSeen": "2026-11-10",
+   "signInWithGoogle": true
   },
   {
    "name": "Netflix",
    "domain": "netflix.com",
-   "firstSeen": "2015-11-27"
+   "firstSeen": "2015-11-27",
+   "lastSeen": "2026-10-02",
+   "signInWithGoogle": false
   },
   {
    "name": "Duolingo",
    "domain": "duolingo.com",
-   "firstSeen": "2020-04-02"
+   "firstSeen": "2020-04-02",
+   "lastSeen": "2026-08-15",
+   "signInWithGoogle": true
   },
   {
    "name": "Discord",
    "domain": "discord.com",
-   "firstSeen": "2020-06-12"
+   "firstSeen": "2020-06-12",
+   "lastSeen": "2026-11-12",
+   "signInWithGoogle": false
   },
   {
    "name": "Uber",
    "domain": "uber.com",
-   "firstSeen": "2017-08-23"
+   "firstSeen": "2017-08-23",
+   "lastSeen": "2026-06-05",
+   "signInWithGoogle": false
   },
   {
    "name": "Slack",
    "domain": "slack.com",
-   "firstSeen": "2021-01-15"
+   "firstSeen": "2021-01-15",
+   "lastSeen": "2026-10-21",
+   "signInWithGoogle": true
   },
   {
    "name": "Figma",
    "domain": "figma.com",
-   "firstSeen": "2022-09-06"
+   "firstSeen": "2022-09-06",
+   "lastSeen": "2026-09-01",
+   "signInWithGoogle": true
   },
   {
    "name": "Notion",
    "domain": "notion.so",
-   "firstSeen": "2021-10-11"
+   "firstSeen": "2021-10-11",
+   "lastSeen": "2026-07-07",
+   "signInWithGoogle": true
   },
   {
    "name": "Amazon",
    "domain": "amazon.com",
-   "firstSeen": "2011-12-01"
+   "firstSeen": "2011-12-01",
+   "lastSeen": "2026-11-08",
+   "signInWithGoogle": false
   }
  ],
  "services": [
@@ -142,7 +182,8 @@ export const CITY = {
       "Social media profiles",
       "Job titles"
      ],
-     "records": 125724601
+     "records": 125724601,
+     "industry": "Information Technology"
     },
     {
      "name": "LinkedIn",
@@ -151,7 +192,8 @@ export const CITY = {
       "Email addresses",
       "Passwords"
      ],
-     "records": 160042644
+     "records": 160042644,
+     "industry": "Information Technology"
     }
    ]
   ],
@@ -167,7 +209,8 @@ export const CITY = {
       "Passwords",
       "IP addresses"
      ],
-     "records": 143570814
+     "records": 143570814,
+     "industry": "Health Care"
     }
    ]
   ],
@@ -182,7 +225,8 @@ export const CITY = {
       "Passwords",
       "Email addresses"
      ],
-     "records": 152403035
+     "records": 152403035,
+     "industry": "Information Technology"
     }
    ]
   ],
@@ -197,7 +241,8 @@ export const CITY = {
       "Names",
       "Usernames"
      ],
-     "records": 137504762
+     "records": 137504762,
+     "industry": "Information Technology"
     }
    ]
   ],
@@ -212,7 +257,8 @@ export const CITY = {
       "Usernames",
       "Passwords"
      ],
-     "records": 39736948
+     "records": 39736948,
+     "industry": "Education"
     }
    ]
   ],
@@ -226,7 +272,8 @@ export const CITY = {
       "Email addresses",
       "Passwords"
      ],
-     "records": 68760320
+     "records": 68760320,
+     "industry": "Information Technology"
     }
    ]
   ],
@@ -242,7 +289,8 @@ export const CITY = {
       "Passwords",
       "Phone numbers"
      ],
-     "records": 172817913
+     "records": 172817913,
+     "industry": "Entertainment"
     }
    ]
   ],
@@ -263,7 +311,8 @@ export const CITY = {
       "Social media profiles",
       "Geographic locations"
      ],
-     "records": 268113400
+     "records": 268113400,
+     "industry": "Entertainment"
     }
    ]
   ],
@@ -279,7 +328,8 @@ export const CITY = {
       "Email addresses",
       "Dates of birth"
      ],
-     "records": 244007616
+     "records": 244007616,
+     "industry": "Music"
     }
    ]
   ],
@@ -296,7 +346,8 @@ export const CITY = {
       "Phone numbers",
       "Geographic locations"
      ],
-     "records": 5308134
+     "records": 5308134,
+     "industry": "Information Technology"
     },
     {
      "name": "Twitter-Scraped",
@@ -309,7 +360,8 @@ export const CITY = {
       "Profile photos",
       "Phone numbers"
      ],
-     "records": 208918735
+     "records": 208918735,
+     "industry": "Information Technology"
     }
    ]
   ],
@@ -324,7 +376,8 @@ export const CITY = {
       "Names",
       "Usernames"
      ],
-     "records": 2676686
+     "records": 2676686,
+     "industry": "Education"
     }
    ]
   ]
