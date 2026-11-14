@@ -1,0 +1,361 @@
+{
+  "accounts": 20,
+  "yourDataBreached": 2,
+  "serviceBreached": 9,
+  "noKnownBreach": 9,
+  "exposureScore": 72,
+  "exposedData": [
+    {
+      "type": "Email addresses",
+      "breaches": 2
+    },
+    {
+      "type": "Names",
+      "breaches": 1
+    },
+    {
+      "type": "Genders",
+      "breaches": 1
+    },
+    {
+      "type": "Social media profiles",
+      "breaches": 1
+    },
+    {
+      "type": "Job titles",
+      "breaches": 1
+    },
+    {
+      "type": "Usernames",
+      "breaches": 1
+    },
+    {
+      "type": "Passwords",
+      "breaches": 1
+    },
+    {
+      "type": "IP addresses",
+      "breaches": 1
+    }
+  ],
+  "oldestLeak": {
+    "name": "MyFitnessPal",
+    "date": "2018-02-01"
+  },
+  "newestLeak": {
+    "name": "LinkedInScrape-2021",
+    "date": "2021-04-01"
+  },
+  "largestBreach": {
+    "name": "Wattpad",
+    "account": "Wattpad",
+    "records": 268113400,
+    "date": "2020-06-01"
+  },
+  "breachedWhileMember": [
+    {
+      "name": "Adobe",
+      "domain": "adobe.com",
+      "breach": "Adobe",
+      "date": "2013-10-01",
+      "exposedData": [
+        "Usernames",
+        "Passwords",
+        "Email addresses"
+      ]
+    },
+    {
+      "name": "Canva",
+      "domain": "canva.com",
+      "breach": "Canva",
+      "date": "2019-05-01",
+      "exposedData": [
+        "Email addresses",
+        "Names",
+        "Usernames"
+      ]
+    },
+    {
+      "name": "Chegg",
+      "domain": "chegg.com",
+      "breach": "Chegg",
+      "date": "2018-04-01",
+      "exposedData": [
+        "Email addresses",
+        "Usernames",
+        "Passwords"
+      ]
+    },
+    {
+      "name": "Deezer",
+      "domain": "deezer.com",
+      "breach": "Deezer",
+      "date": "2019-04-01",
+      "exposedData": [
+        "Usernames",
+        "Names",
+        "Email addresses",
+        "Dates of birth"
+      ]
+    },
+    {
+      "name": "Dropbox",
+      "domain": "dropbox.com",
+      "breach": "Dropbox",
+      "date": "2012-07-01",
+      "exposedData": [
+        "Email addresses",
+        "Passwords"
+      ]
+    },
+    {
+      "name": "Duolingo",
+      "domain": "duolingo.com",
+      "breach": "Duolingo",
+      "date": "2023-01-01",
+      "exposedData": [
+        "Email addresses",
+        "Names",
+        "Usernames"
+      ]
+    },
+    {
+      "name": "Twitter",
+      "domain": "twitter.com",
+      "breach": "Twitter",
+      "date": "2022-01-01",
+      "exposedData": [
+        "Usernames",
+        "Names",
+        "Email addresses",
+        "Phone numbers",
+        "Geographic locations"
+      ]
+    },
+    {
+      "name": "Wattpad",
+      "domain": "wattpad.com",
+      "breach": "Wattpad",
+      "date": "2020-06-01",
+      "exposedData": [
+        "Email addresses",
+        "Names",
+        "Usernames",
+        "Dates of birth",
+        "Passwords",
+        "IP addresses",
+        "Genders",
+        "Social media profiles",
+        "Geographic locations"
+      ]
+    },
+    {
+      "name": "Zynga",
+      "domain": "zynga.com",
+      "breach": "Zynga",
+      "date": "2019-09-01",
+      "exposedData": [
+        "Email addresses",
+        "Usernames",
+        "Passwords",
+        "Phone numbers"
+      ]
+    }
+  ],
+  "fixFirst": [
+    {
+      "name": "MyFitnessPal",
+      "domain": "myfitnesspal.com",
+      "why": "Your data was in the MyFitnessPal breach (2018)",
+      "steps": [
+        "Change your MyFitnessPal password, and the password on any other site where you reused it.",
+        "Turn on two-step verification (2FA) for MyFitnessPal.",
+        "Use a password manager so every site gets its own unique password.",
+        "Expect phishing emails that mention MyFitnessPal; sign in by typing the address, not by clicking links."
+      ]
+    },
+    {
+      "name": "LinkedIn",
+      "domain": "linkedin.com",
+      "why": "Your data was in the LinkedInScrape-2021 breach (2021)",
+      "steps": [
+        "Review your LinkedInScrape-2021 account for activity you don't recognize.",
+        "Turn on two-step verification (2FA) for LinkedInScrape-2021.",
+        "Expect phishing emails that mention LinkedInScrape-2021; sign in by typing the address, not by clicking links."
+      ]
+    },
+    {
+      "name": "Adobe",
+      "domain": "adobe.com",
+      "why": "Adobe was breached in 2013, after you joined",
+      "steps": [
+        "Your email wasn't found in this leak, but if you had an Adobe account back then, change that password to be safe.",
+        "Turn on two-step verification (2FA) for Adobe.",
+        "Use a password manager so every site gets its own unique password.",
+        "Expect phishing emails that mention Adobe; sign in by typing the address, not by clicking links."
+      ]
+    },
+    {
+      "name": "Canva",
+      "domain": "canva.com",
+      "why": "Canva was breached in 2019, after you joined",
+      "steps": [
+        "Your email wasn't found in this leak, but if you had a Canva account back then, change that password to be safe.",
+        "Turn on two-step verification (2FA) for Canva.",
+        "Expect phishing emails that mention Canva; sign in by typing the address, not by clicking links."
+      ]
+    },
+    {
+      "name": "Chegg",
+      "domain": "chegg.com",
+      "why": "Chegg was breached in 2018, after you joined",
+      "steps": [
+        "Your email wasn't found in this leak, but if you had a Chegg account back then, change that password to be safe.",
+        "Turn on two-step verification (2FA) for Chegg.",
+        "Use a password manager so every site gets its own unique password.",
+        "Expect phishing emails that mention Chegg; sign in by typing the address, not by clicking links."
+      ]
+    },
+    {
+      "name": "Deezer",
+      "domain": "deezer.com",
+      "why": "Deezer was breached in 2019, after you joined",
+      "steps": [
+        "Your email wasn't found in this leak, but if you had a Deezer account back then, change that password to be safe.",
+        "Turn on two-step verification (2FA) for Deezer.",
+        "Expect phishing emails that mention Deezer; sign in by typing the address, not by clicking links.",
+        "Watch for identity-theft attempts; consider freezing your credit."
+      ]
+    },
+    {
+      "name": "Dropbox",
+      "domain": "dropbox.com",
+      "why": "Dropbox was breached in 2012, after you joined",
+      "steps": [
+        "Your email wasn't found in this leak, but if you had a Dropbox account back then, change that password to be safe.",
+        "Turn on two-step verification (2FA) for Dropbox.",
+        "Use a password manager so every site gets its own unique password.",
+        "Expect phishing emails that mention Dropbox; sign in by typing the address, not by clicking links."
+      ]
+    },
+    {
+      "name": "Duolingo",
+      "domain": "duolingo.com",
+      "why": "Duolingo was breached in 2023, after you joined",
+      "steps": [
+        "Your email wasn't found in this leak, but if you had a Duolingo account back then, change that password to be safe.",
+        "Turn on two-step verification (2FA) for Duolingo.",
+        "Expect phishing emails that mention Duolingo; sign in by typing the address, not by clicking links."
+      ]
+    },
+    {
+      "name": "Twitter",
+      "domain": "twitter.com",
+      "why": "Twitter was breached in 2022, after you joined",
+      "steps": [
+        "Your email wasn't found in this leak, but if you had a Twitter account back then, change that password to be safe.",
+        "Turn on two-step verification (2FA) for Twitter.",
+        "Be wary of scam texts and calls, and ask your carrier for a SIM-swap PIN.",
+        "Expect phishing emails that mention Twitter; sign in by typing the address, not by clicking links."
+      ]
+    },
+    {
+      "name": "Wattpad",
+      "domain": "wattpad.com",
+      "why": "Wattpad was breached in 2020, after you joined",
+      "steps": [
+        "Your email wasn't found in this leak, but if you had a Wattpad account back then, change that password to be safe.",
+        "Turn on two-step verification (2FA) for Wattpad.",
+        "Use a password manager so every site gets its own unique password.",
+        "Expect phishing emails that mention Wattpad; sign in by typing the address, not by clicking links.",
+        "Watch for identity-theft attempts; consider freezing your credit."
+      ]
+    },
+    {
+      "name": "Zynga",
+      "domain": "zynga.com",
+      "why": "Zynga was breached in 2019, after you joined",
+      "steps": [
+        "Your email wasn't found in this leak, but if you had a Zynga account back then, change that password to be safe.",
+        "Turn on two-step verification (2FA) for Zynga.",
+        "Use a password manager so every site gets its own unique password.",
+        "Be wary of scam texts and calls, and ask your carrier for a SIM-swap PIN.",
+        "Expect phishing emails that mention Zynga; sign in by typing the address, not by clicking links."
+      ]
+    }
+  ],
+  "footprintByYear": [
+    {
+      "year": 2011,
+      "accounts": 1
+    },
+    {
+      "year": 2012,
+      "accounts": 2
+    },
+    {
+      "year": 2013,
+      "accounts": 1
+    },
+    {
+      "year": 2014,
+      "accounts": 1
+    },
+    {
+      "year": 2015,
+      "accounts": 2
+    },
+    {
+      "year": 2016,
+      "accounts": 2
+    },
+    {
+      "year": 2017,
+      "accounts": 2
+    },
+    {
+      "year": 2018,
+      "accounts": 2
+    },
+    {
+      "year": 2019,
+      "accounts": 2
+    },
+    {
+      "year": 2020,
+      "accounts": 2
+    },
+    {
+      "year": 2021,
+      "accounts": 2
+    },
+    {
+      "year": 2022,
+      "accounts": 1
+    }
+  ],
+  "signInWithGoogle": 7,
+  "dormant": 7,
+  "industries": [
+    {
+      "industry": "Information Technology",
+      "accounts": 5
+    },
+    {
+      "industry": "Education",
+      "accounts": 2
+    },
+    {
+      "industry": "Entertainment",
+      "accounts": 2
+    },
+    {
+      "industry": "Health Care",
+      "accounts": 1
+    },
+    {
+      "industry": "Music",
+      "accounts": 1
+    }
+  ]
+}

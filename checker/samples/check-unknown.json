@@ -1,0 +1,10 @@
+{
+  "id": "acct_d67cd22ba68b",
+  "label": "u***@demo.test",
+  "source": "Demo fixtures (sample data, not a live lookup)",
+  "checkedAt": null,
+  "status": "unknown",
+  "breaches": [],
+  "accounts": [],
+  "error": "Check unavailable: this source has no data for this account."
+}

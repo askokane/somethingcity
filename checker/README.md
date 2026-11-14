@@ -11,6 +11,10 @@ The backend for Breach City (Justin's workstream). It turns an email the user **
 
 Import everything from `checker/checker.js`. It's a plain ES module: no build step, and it works in the browser. The server runs at `http://localhost:8787`.
 
+**Build without running anything:**
+- **[samples/](samples/)** has real output of every call: `check-city.json`, `city-layout.json` (also `-crowded`, with a district), `summary.json`, `news.json`, `timeline-mine.json`, `explain-fallback.json` and `check-unknown.json`. Regenerate them with `npm run samples`.
+- **[checker.d.ts](checker.d.ts)** gives every function and shape types, so editors autocomplete `building.state`, `stats.fixFirst` and so on, even in plain JavaScript.
+
 > **Heads up:** the untracked prototype in `web/` (from another chat) predates most of this. It has no amber state, no `cityLayout`, no stats, news or explanations, so treat it as a reference for wiring sign-in, not as the current contract.
 
 ---
@@ -337,6 +341,8 @@ Tested on a real, years-old inbox: **137 accounts** found.
 | `server.js` | HTTP server: verification, Google sign-in, checks, explain, news, timelines, logos, `/dev` |
 | `sources.js` | XposedOrNot lookups and the Gmail inbox scan |
 | `db.js` | Tiger Data: catalog loader, news, timelines, service-breach join |
+| `checker.d.ts` | Types for everything above |
+| `samples/`, `make-samples.js` | Real example responses, and the script that regenerates them (`npm run samples`) |
 | `checker.test.js` | Tests |
 
 ## Tests

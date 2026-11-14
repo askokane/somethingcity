@@ -1,0 +1,205 @@
+{
+  "buildings": [
+    {
+      "key": "linkedin.com",
+      "label": "LinkedIn",
+      "name": "LinkedIn",
+      "domain": "linkedin.com",
+      "state": "breached",
+      "height": 5,
+      "logo": "/api/logo?breach=LinkedInScrape-2021",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "myfitnesspal.com",
+      "label": "MyFitnessPal",
+      "name": "MyFitnessPal",
+      "domain": "myfitnesspal.com",
+      "state": "breached",
+      "height": 4,
+      "logo": "/api/logo?breach=MyFitnessPal",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "adobe.com",
+      "label": "Adobe",
+      "name": "Adobe",
+      "domain": "adobe.com",
+      "state": "service",
+      "height": 5,
+      "logo": "/api/logo?breach=Adobe",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "dropbox.com",
+      "label": "Dropbox",
+      "name": "Dropbox",
+      "domain": "dropbox.com",
+      "state": "service",
+      "height": 5,
+      "logo": "/api/logo?breach=Dropbox",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "zynga.com",
+      "label": "Zynga",
+      "name": "Zynga",
+      "domain": "zynga.com",
+      "state": "service",
+      "height": 5,
+      "logo": "/api/logo?breach=Zynga",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "chegg.com",
+      "label": "Chegg",
+      "name": "Chegg",
+      "domain": "chegg.com",
+      "state": "service",
+      "height": 4,
+      "logo": "/api/logo?breach=Chegg",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "twitter.com",
+      "label": "Twitter",
+      "name": "Twitter",
+      "domain": "twitter.com",
+      "state": "service",
+      "height": 4,
+      "logo": "/api/logo?breach=Twitter",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "canva.com",
+      "label": "Canva",
+      "name": "Canva",
+      "domain": "canva.com",
+      "state": "service",
+      "height": 3,
+      "logo": "/api/logo?breach=Canva",
+      "signInWithGoogle": true
+    },
+    {
+      "key": "deezer.com",
+      "label": "Deezer",
+      "name": "Deezer",
+      "domain": "deezer.com",
+      "state": "service",
+      "height": 3,
+      "logo": "/api/logo?breach=Deezer",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "duolingo.com",
+      "label": "Duolingo",
+      "name": "Duolingo",
+      "domain": "duolingo.com",
+      "state": "service",
+      "height": 3,
+      "logo": "/api/logo?breach=Duolingo",
+      "signInWithGoogle": true
+    },
+    {
+      "key": "wattpad.com",
+      "label": "Wattpad",
+      "name": "Wattpad",
+      "domain": "wattpad.com",
+      "state": "service",
+      "height": 3,
+      "logo": "/api/logo?breach=Wattpad",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "amazon.com",
+      "label": "Amazon",
+      "name": "Amazon",
+      "domain": "amazon.com",
+      "state": "clear",
+      "height": 5,
+      "logo": null,
+      "signInWithGoogle": false
+    },
+    {
+      "key": "netflix.com",
+      "label": "Netflix",
+      "name": "Netflix",
+      "domain": "netflix.com",
+      "state": "clear",
+      "height": 4,
+      "logo": null,
+      "signInWithGoogle": false
+    },
+    {
+      "key": "spotify.com",
+      "label": "Spotify",
+      "name": "Spotify",
+      "domain": "spotify.com",
+      "state": "clear",
+      "height": 4,
+      "logo": null,
+      "signInWithGoogle": true
+    },
+    {
+      "key": "uber.com",
+      "label": "Uber",
+      "name": "Uber",
+      "domain": "uber.com",
+      "state": "clear",
+      "height": 4,
+      "logo": null,
+      "signInWithGoogle": false
+    },
+    {
+      "key": "discord.com",
+      "label": "Discord",
+      "name": "Discord",
+      "domain": "discord.com",
+      "state": "clear",
+      "height": 3,
+      "logo": null,
+      "signInWithGoogle": false
+    },
+    {
+      "key": "github.com",
+      "label": "GitHub",
+      "name": "GitHub",
+      "domain": "github.com",
+      "state": "clear",
+      "height": 3,
+      "logo": null,
+      "signInWithGoogle": true
+    },
+    {
+      "key": "figma.com",
+      "label": "Figma",
+      "name": "Figma",
+      "domain": "figma.com",
+      "state": "clear",
+      "height": 2,
+      "logo": null,
+      "signInWithGoogle": true
+    },
+    {
+      "key": "notion.so",
+      "label": "Notion",
+      "name": "Notion",
+      "domain": "notion.so",
+      "state": "clear",
+      "height": 2,
+      "logo": null,
+      "signInWithGoogle": true
+    },
+    {
+      "key": "slack.com",
+      "label": "Slack",
+      "name": "Slack",
+      "domain": "slack.com",
+      "state": "clear",
+      "height": 2,
+      "logo": null,
+      "signInWithGoogle": true
+    }
+  ],
+  "district": null
+}

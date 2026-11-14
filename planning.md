@@ -2,7 +2,7 @@
 
 ## Product idea
 
-Build a browser-based cybersecurity awareness experience inspired by city-building games. A user adds accounts they want to monitor, the app checks whether the account identifier appears in a permitted breach dataset/API, and results become visible in a small 3D city. The city is a memorable dashboard: each account maps to a building, and a confirmed breach changes that building's state and opens a readable incident panel with the service, breach date, exposed data categories (when available), and practical next steps.
+Build a browser-based cybersecurity awareness experience inspired by city-building games. A user adds accounts they want to monitor, the app checks whether the account identifier appears in a permitted breach dataset/API, and results become visible in a small 3D city. The city is a memorable dashboard: each website linked to the user's email (found from breach data and, with consent, their inbox) is a skyscraper with its name on it, and a breach changes that building's state (red: your data leaked; amber: the service was breached) and opens a readable incident panel with the service, breach date, exposed data categories (when available), and practical next steps. A few special landmark buildings hold the dashboard panels.
 
 **Working name:** Breach City (placeholder)
 
@@ -28,7 +28,7 @@ The demo should complete one clear loop:
 1. Add a small set of accounts (email addresses or demo fixtures).
 2. Check them against a breach-check provider or a seeded local demo dataset.
 3. Show per-account status: `No known breach found`, `Known breach`, or `Check unavailable`.
-4. Render one building per account; use distinct, accessible states for clean, affected, and unknown.
+4. Render one building per linked account (website); use distinct, accessible states for clean, affected, and unknown.
 5. Select a building to inspect the result and suggested actions.
 6. Include a reset/demo-data path so judges can see both clean and breached examples quickly.
 
@@ -101,10 +101,19 @@ type AccountCheck = {
   }>;
   source: string;
   error?: string;           // safe, user-readable explanation
+  accounts: Array<{         // added during build: one skyscraper per website linked to the email
+    name: string;           // "Adobe"
+    domain: string;         // "adobe.com", the building key
+    breached: boolean;      // red: this email was in a breach of this service
+    serviceBreaches: Array<{ name: string; date: string; exposedData: string[]; records: number | null }>; // amber
+    // ...plus foundIn, firstSeen, lastSeen, signInWithGoogle
+  }>;
 };
 ```
 
 The checker should return `unknown` on timeout, rate limit, missing API configuration, or provider errors. Keep raw identifiers out of logs and analytics.
+
+**The current, complete contract lives with the checker:** [checker/README.md](checker/README.md) (frontend guide and screen map), [checker/checker.d.ts](checker/checker.d.ts) (types) and [checker/samples/](checker/samples/) (real example responses). `cityLayout()` and `summarize()` in `checker.js` turn a result into ready-to-draw buildings and dashboard stats.
 
 ## Suggested hackathon schedule
 

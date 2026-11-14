@@ -1,0 +1,118 @@
+{
+  "buildings": [
+    {
+      "key": "linkedin.com",
+      "label": "LinkedIn",
+      "name": "LinkedIn",
+      "domain": "linkedin.com",
+      "state": "breached",
+      "height": 5,
+      "logo": "/api/logo?breach=LinkedInScrape-2021",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "myfitnesspal.com",
+      "label": "MyFitnessPal",
+      "name": "MyFitnessPal",
+      "domain": "myfitnesspal.com",
+      "state": "breached",
+      "height": 4,
+      "logo": "/api/logo?breach=MyFitnessPal",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "adobe.com",
+      "label": "Adobe",
+      "name": "Adobe",
+      "domain": "adobe.com",
+      "state": "service",
+      "height": 5,
+      "logo": "/api/logo?breach=Adobe",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "dropbox.com",
+      "label": "Dropbox",
+      "name": "Dropbox",
+      "domain": "dropbox.com",
+      "state": "service",
+      "height": 5,
+      "logo": "/api/logo?breach=Dropbox",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "zynga.com",
+      "label": "Zynga",
+      "name": "Zynga",
+      "domain": "zynga.com",
+      "state": "service",
+      "height": 5,
+      "logo": "/api/logo?breach=Zynga",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "chegg.com",
+      "label": "Chegg",
+      "name": "Chegg",
+      "domain": "chegg.com",
+      "state": "service",
+      "height": 4,
+      "logo": "/api/logo?breach=Chegg",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "twitter.com",
+      "label": "Twitter",
+      "name": "Twitter",
+      "domain": "twitter.com",
+      "state": "service",
+      "height": 4,
+      "logo": "/api/logo?breach=Twitter",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "canva.com",
+      "label": "Canva",
+      "name": "Canva",
+      "domain": "canva.com",
+      "state": "service",
+      "height": 3,
+      "logo": "/api/logo?breach=Canva",
+      "signInWithGoogle": true
+    },
+    {
+      "key": "deezer.com",
+      "label": "Deezer",
+      "name": "Deezer",
+      "domain": "deezer.com",
+      "state": "service",
+      "height": 3,
+      "logo": "/api/logo?breach=Deezer",
+      "signInWithGoogle": false
+    },
+    {
+      "key": "duolingo.com",
+      "label": "Duolingo",
+      "name": "Duolingo",
+      "domain": "duolingo.com",
+      "state": "service",
+      "height": 3,
+      "logo": "/api/logo?breach=Duolingo",
+      "signInWithGoogle": true
+    },
+    {
+      "key": "wattpad.com",
+      "label": "Wattpad",
+      "name": "Wattpad",
+      "domain": "wattpad.com",
+      "state": "service",
+      "height": 3,
+      "logo": "/api/logo?breach=Wattpad",
+      "signInWithGoogle": false
+    }
+  ],
+  "district": {
+    "count": 9,
+    "service": 0
+  }
+}

@@ -1,0 +1,170 @@
+{
+  "recent": [
+    {
+      "name": "CyrusOne",
+      "domain": "cyrusone.com",
+      "date": "2026-08-01",
+      "addedDate": "2026-11-14",
+      "industry": "Information Technology",
+      "records": 357752,
+      "exposedData": [
+        "Email addresses",
+        "Names",
+        "Phone numbers",
+        "Physical addresses",
+        "Employers",
+        "Job titles"
+      ],
+      "description": "CyrusOne, a data centre operator, was allegedly breached by the ShinyHunters group in August 2026, with data later published online exposing 373k unique email addresses along with names, physical addresses, phone numbers, job titles, support tickets, and operational information relating to…"
+    },
+    {
+      "name": "CookMedical",
+      "domain": "cookmedical.com",
+      "date": "2026-08-01",
+      "addedDate": "2026-11-13",
+      "industry": "Health Care",
+      "records": 147133,
+      "exposedData": [
+        "Email addresses",
+        "Names"
+      ],
+      "description": "Cook Medical, a medical device manufacturing company, was allegedly breached by the ShinyHunters group in August 2026, with data later published online exposing 147k unique email addresses along with names."
+    },
+    {
+      "name": "GolfCanada",
+      "domain": "golfcanada.ca",
+      "date": "2026-05-01",
+      "addedDate": "2026-11-09",
+      "industry": "Sports",
+      "records": 572068,
+      "exposedData": [
+        "Email addresses",
+        "Names",
+        "Usernames",
+        "Dates of birth",
+        "Genders",
+        "Geographic locations"
+      ],
+      "description": "Golf Canada, a Canadian golf governing organization, allegedly had user data exposed in mid-2026, with records later circulating on Telegram containing 572k unique email addresses along with names, usernames, dates of birth, genders, and geographic locations including cities, provinces, and…"
+    },
+    {
+      "name": "Neogen",
+      "domain": "neogen.com",
+      "date": "2026-08-01",
+      "addedDate": "2026-11-05",
+      "industry": "Manufacturing",
+      "records": 445899,
+      "exposedData": [
+        "Email addresses",
+        "Names",
+        "Phone numbers",
+        "Physical addresses",
+        "Employers",
+        "Job titles"
+      ],
+      "description": "Neogen, a food and animal safety company, was allegedly breached by the ShinyHunters group in August 2026, with data later published online exposing 445k unique email addresses from corporate mailing lists, employee records, and other business contacts."
+    },
+    {
+      "name": "GitesDeFrance",
+      "domain": "gites-de-france.com",
+      "date": "2026-05-01",
+      "addedDate": "2026-10-23",
+      "industry": "Hospitality",
+      "records": 117678,
+      "exposedData": [
+        "Email addresses",
+        "Names",
+        "Phone numbers",
+        "Physical addresses"
+      ],
+      "description": "Gîtes de France, a French holiday rental network, was breached in May 2026, affecting several departmental branches and exposing 118k unique email addresses along with customer names, phone numbers, postal addresses, and booking details."
+    }
+  ],
+  "biggest": [
+    {
+      "name": "Verifications",
+      "domain": "verifications.io",
+      "date": "2019-02-01",
+      "addedDate": "2023-11-08",
+      "industry": "Information Technology",
+      "records": 762579945,
+      "exposedData": [
+        "Email addresses",
+        "Names",
+        "Dates of birth",
+        "Genders",
+        "Geographic locations",
+        "Phone numbers",
+        "Physical addresses"
+      ],
+      "description": "Verifications.io, a comprehensive email verification service, suffered a severe data breach in 2019 that compromised a vast array of personal user data. The exposed data included email addresses, phone numbers, dates of birth, and other personal details, which presented a considerable privacy…"
+    },
+    {
+      "name": "ExploitIN",
+      "domain": "exploit.in",
+      "date": "2016-10-01",
+      "addedDate": "2023-11-08",
+      "industry": "Information Technology",
+      "records": 592919058,
+      "exposedData": [
+        "Email addresses",
+        "Passwords"
+      ],
+      "description": "Exploit.IN was a hacking forum and marketplace that was hacked in 2016. The hacker gained access to the site's database, which contained over 590 million user accounts with email addresses, usernames, IP addresses, and hashed passwords. The database was subsequently made available for free…"
+    },
+    {
+      "name": "Wattpad",
+      "domain": "wattpad.com",
+      "date": "2020-06-01",
+      "addedDate": "2023-11-08",
+      "industry": "Entertainment",
+      "records": 268113400,
+      "exposedData": [
+        "Email addresses",
+        "Names",
+        "Usernames",
+        "Dates of birth",
+        "Passwords",
+        "IP addresses",
+        "Genders",
+        "Social media profiles",
+        "Geographic locations"
+      ],
+      "description": "Wattpad, a self-publishing platform that claims to be “the world’s most-loved social storytelling platform,” suffered a data breach exposing all of its users. The leaked database included more than 270 million records with more than 268 million unique email address and password combinations.…"
+    },
+    {
+      "name": "Deezer",
+      "domain": "deezer.com",
+      "date": "2019-04-01",
+      "addedDate": "2023-11-08",
+      "industry": "Music",
+      "records": 244007616,
+      "exposedData": [
+        "Usernames",
+        "Names",
+        "Email addresses",
+        "Dates of birth"
+      ],
+      "description": "Deezer, a music streaming service, suffered a data breach that was made public in November 2022 but originally occurred in 2019. The breach exposed the personal details of 240 million users, including first and last names, dates of birth, email addresses, gender, location data, join date, user…"
+    },
+    {
+      "name": "NetEase",
+      "domain": "163.com",
+      "date": "2015-10-01",
+      "addedDate": "2023-11-08",
+      "industry": "Information Technology",
+      "records": 232857074,
+      "exposedData": [
+        "Email addresses",
+        "Passwords"
+      ],
+      "description": "NetEase, a Chinese internet technology company, suffered a data breach in 2015, where personal information of around 200 million users was exposed, including email addresses, usernames, and hashed passwords."
+    }
+  ],
+  "thisYear": {
+    "year": 2026,
+    "breaches": 88,
+    "records": 293558300
+  },
+  "source": "Tiger Data"
+}
