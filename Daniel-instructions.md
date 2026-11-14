@@ -3,6 +3,16 @@
 ## Mission
 Create the reusable account-building asset for Breach City. Each monitored account maps to one building, and the app changes its appearance to reflect the account's breach-check status.
 
+## Step-by-step prompting workflow
+Use these prompts in order, carrying forward the conventions agreed with Tai and Atharva:
+1. **Confirm asset conventions:** “Summarize the building requirements and list the agreed dimensions, origin/pivot, orientation, export format, camera distance, and material names. Identify anything I need to confirm before modeling.”
+2. **Create a placeholder:** “Make a simple, low-poly placeholder account building that matches the agreed conventions. Export it with a screenshot and enough notes for Atharva to instance it in the gray-box scene.”
+3. **Design status states:** “Propose clear, breached, and unknown treatments using named material slots or variants. Ensure each is distinguishable at the demo camera distance and status is not conveyed by color alone where feasible.”
+4. **Refine the reusable model:** “Refine the placeholder silhouette and visible details while keeping geometry lightweight and preserving the agreed origin, scale, orientation, and state mapping.”
+5. **Package and verify handoff:** “Export the final reusable asset. Provide exact material/state names, dimensions, pivot/orientation, import notes, and any animation or lighting requirements. Incorporate Atharva’s integration feedback.”
+
+Keep account names and sensitive information out of the asset; retain a static version as a fallback.
+
 ## Coordinate with the team first
 - Coordinate with Tai and Atharva on scene scale, origin/pivot, orientation, export format, and material naming.
 - Deliver a placeholder building quickly so Atharva can build the scene before the polished model is ready.

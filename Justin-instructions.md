@@ -3,6 +3,16 @@
 ## Mission
 Build the account entry and breach-check layer for the Breach City demo. It should accept user-authorized account identifiers, return a safe normalized result, and remain demoable when a live provider is unavailable.
 
+## Step-by-step prompting workflow
+Use these prompts in order, sharing the current interface and setup details as they become available:
+1. **Confirm the contract:** “Review the `AccountCheck` contract and propose the smallest checker API, input rules, and ownership split with Atharva. Flag any ambiguity before implementing.”
+2. **Build the fixture path:** “Implement deterministic fixtures for clear, breached, and unknown outcomes behind the agreed API. Include safe masked labels and sample responses; make this work without network access or credentials.”
+3. **Add validation and normalization:** “Implement account identifier validation, masking, and normalization into `AccountCheck`. Keep raw identifiers out of logs, URLs, analytics, and errors.”
+4. **Add an approved live adapter if feasible:** “Inspect the approved provider requirements and implement an adapter only if credentials and time allow. Map failures, timeouts, rate limits, and partial results to `unknown`; document exactly what is sent and source coverage.”
+5. **Handoff and integrate:** “Provide Atharva the API/type, fixture examples, setup/environment variable notes, provider limitations, and a concise integration example. Address integration feedback while preserving the stable contract.”
+
+At each step, distinguish confirmed provider behavior from assumptions; never treat a failed or incomplete lookup as clear.
+
 ## Interface contract
 Coordinate with Atharva before implementation and expose a small stable interface. Use the planning document's `AccountCheck` type:
 

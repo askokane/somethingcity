@@ -8,6 +8,19 @@ Build a browser-based cybersecurity awareness experience inspired by city-buildi
 
 **One-line pitch:** See your digital exposure at a glance: every account is a building, and breach history changes the neighborhood.
 
+## Step-by-step prompting guide
+
+Use this sequence to turn the plan into manageable prompts. Start each prompt with the relevant workstream instructions and current project files, then review the result before moving on.
+
+1. **Kickoff and decisions:** “Read this planning doc and the assigned workstream instructions. Summarize the MVP, privacy boundaries, shared `AccountCheck` contract, asset conventions, owners, and unresolved decisions. Draft a short kickoff checklist; do not assume values that the team has not agreed on.”
+2. **Independent first drafts:** “Work only on your assigned workstream. Produce the smallest usable first version: gray-box environment/building, fixture checker, or app shell, as applicable. Follow the agreed interfaces and report assumptions and handoffs.”
+3. **First integration:** “Connect the first available deliverables through the shared contract and agreed scene conventions. Use fixtures and placeholders where needed. Report import or interface mismatches with the exact change required and owner.”
+4. **Complete the user loop:** “Implement and verify the full demo flow: add/select a demo account, run/check results, show clear/breached/unknown in the city and text UI, inspect details, and reset to demo data. Keep the no-network path functional.”
+5. **Polish within scope:** “Improve readability and presentation without changing shared interfaces or adding deferred features. Ensure uncertainty, source, timestamp, and privacy copy are clear.”
+6. **Freeze and rehearse:** “Prepare the final 90-second demo sequence, confirm all three states and the fixture fallback, document limitations, and list only remaining release blockers.”
+
+Treat each step as a separate prompt and use its output to inform the next. If a dependency is missing, continue with the documented placeholder/fixture path and request the specific handoff.
+
 ## Hackathon MVP
 
 The demo should complete one clear loop:

@@ -3,6 +3,16 @@
 ## Mission
 Own the end-to-end Breach City experience and integrate the environment, account buildings, account checker, and interface into a reliable hackathon demo.
 
+## Step-by-step prompting workflow
+Use these prompts in order, keeping the shared contract and conventions visible to every contributor:
+1. **Set the shared interfaces:** “Turn the planning doc into a concise kickoff checklist. Confirm the `AccountCheck` type, asset format, scene scale/origin/orientation, state names, file ownership, and earliest handoffs with the team.”
+2. **Build the gray-box loop:** “Create the app shell with mock accounts and simple placeholder buildings. Implement add/select, run checks, status list/legend, and a detail panel using the shared contract.”
+3. **Integrate the checker:** “Connect the checker behind the same interface as the fixtures. Preserve the no-credentials demo path; show source and timestamp, and map errors or incomplete results to unknown.”
+4. **Integrate art assets:** “Import Tai’s environment and Daniel’s building asset using their documented transforms and material names. Verify multiple instances and all three states, retaining the gray-box fallback.”
+5. **Complete and rehearse:** “Walk through the full user flow. Fix blockers, confirm privacy and uncertainty copy, reset/demo-data behavior, and prepare a 90-second demo script. List any remaining limitations clearly.”
+
+After each prompt, summarize what works, what is blocked, and the exact next handoff needed; freeze shared interfaces before final polish.
+
 ## Start immediately
 - Establish the app shell and a gray-box city with mock data before Blender assets are ready.
 - Publish the shared `AccountCheck` interface from `planning.md` and confirm it with Justin.

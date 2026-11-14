@@ -3,6 +3,16 @@
 ## Mission
 Create the environment asset for the Breach City hackathon demo: a compact city base that makes account status feel visible at a glance.
 
+## Step-by-step prompting workflow
+Use these prompts in order, sharing the relevant agreed conventions and files at each step:
+1. **Confirm the brief:** “Summarize the environment requirements, constraints, and open questions. List the scale, origin, orientation, export format, and palette decisions I need to confirm with Daniel and Atharva before modeling.”
+2. **Plan the blockout:** “Propose a low-poly city block layout with enough visible plots for the demo accounts. Include approximate dimensions, plot coordinates, camera view, and a short asset checklist.”
+3. **Make the gray box:** “Create the simplest usable blockout using the agreed conventions. Keep plots open for replaceable account buildings. Export it and provide a screenshot plus import notes.”
+4. **Integrate and refine:** “Using Atharva’s integration feedback, fix only the specific scale, placement, visibility, or import issues. Then refine roads and a few lightweight environmental details without changing the agreed conventions.”
+5. **Package the handoff:** “Prepare the final export and a concise handoff listing units, origin, scale, camera/orientation, plot coordinates, material/texture requirements, and any known limitations.”
+
+At each step, report assumptions before relying on them; do not change shared conventions without coordinating with the team.
+
 ## Coordinate with the team first
 - Coordinate with Daniel on scale, origin, export format, and visual palette before detailed modeling.
 - Use the frontend's agreed scene orientation and keep the ground plane near world origin.
