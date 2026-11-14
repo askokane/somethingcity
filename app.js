@@ -1622,7 +1622,6 @@ document.addEventListener('keydown', event => {
 
 function openPhone({ eyebrow, title, subtitle, cards, counts = null, listTitle, rows, note, focus, zoom = camera.zoom, mood = 'happy' }) {
   document.querySelector('.mission-board')?.remove();
-  document.querySelector('.mission-recheck')?.remove();
   document.querySelector('.city-stats-dialog').classList.remove('is-mission-board');
   document.querySelector('#city-stats-list').hidden = false;
   document.querySelector('#city-stats-list-name').parentElement.hidden = false;
@@ -1895,29 +1894,6 @@ const landmarkReports = {
       mood: 'normal',
     });
   },
-  // Elliot Memorial: unknown accounts plus an easy route to run the check again.
-  elliot: () => {
-    const unknown = accounts.filter((account) => account.status === 'unknown');
-    openPhone({
-      eyebrow: 'ELLIOT MEMORIAL · RECHECK QUEUE',
-      title: 'Checks to retry',
-      subtitle: 'Unavailable results need a fresh check; unknown does not mean clear',
-      cards: [['UNCHECKED', unknown.length, unknown.length ? 'unknown' : 'clear']],
-      listTitle: 'NEEDS A RECHECK',
-      rows: unknown.map((account) => [account.name, account.error || 'The source did not answer.', 'RETRY', 'unknown']),
-      note: unknown.length ? 'Use Check in the navigation to rerun the verified email check. A successful result replaces the current account list.' : 'No unavailable checks right now.',
-      focus: landmarkBlock('Elliot Memorial'),
-      mood: unknown.length ? 'unsure' : 'happy',
-    });
-    if (unknown.length) {
-      const retry = document.createElement('button');
-      retry.type = 'button';
-      retry.className = 'mission-recheck';
-      retry.textContent = 'Run check again';
-      retry.addEventListener('click', runChecks);
-      document.querySelector('#city-stats-note').after(retry);
-    }
-  },
   wayne: () => {
     const districtCount = new Map(islands.map((region) => [region.name, new Set(blocks.filter((block) => block.island === region.name).map((block) => block.district)).size]));
     openPhone({
@@ -2163,7 +2139,7 @@ function installCheck(result) {
   currentCheck = result;
   const stamp = result.checkedAt ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(result.checkedAt)) : null;
   // Websites come from the breach lookup and, after Google sign-in, the inbox scan. With neither there are no websites to
-  // build, so no placeholder posing as one; a check that couldn't run still shows one 'unknown' entry for Elliot Memorial.
+  // build, so no placeholder posing as one; an unavailable check keeps its masked identity as one unknown city entry.
   const entries = result.accounts.length ? result.accounts : result.status === 'unknown' ? [{ name: result.label, domain: '', breached: false, breaches: [], foundIn: [], firstSeen: null }] : [];
   placementOrder = landmarkSlotOrder();
   // Taller towers go behind shorter ones: take the plots the scatter picked, then give the oldest (tallest) sites the plots
@@ -2352,11 +2328,13 @@ renderer.domElement.addEventListener('pointerup', (event) => {
     showAccountReport(node.userData.accountId);
   } else if (node?.userData.landmark) {
     const name = node.userData.landmark;
-    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham', 'Gotham Bank': 'bank', 'GCPD Headquarters': 'gcpd', 'Cobblepot Manor': 'cobblepot', 'Blackgate Penitentiary': 'blackgate', 'Elliot Memorial': 'elliot' }[name];
+    if (name === 'Elliot Memorial') return;
     if (name === 'Wayne Manor') { batmanHome(); return; }
-    { const box = new THREE.Box3().setFromObject(node); sendBatman((box.min.x + box.max.x) / 2, (box.min.z + box.max.z) / 2); }
-    if (key) landmarkReports[key]();
-    else openPhone({ eyebrow: name.toUpperCase(), title: name, subtitle: 'City-wide account overview', cards: [['ACCOUNTS MONITORED', accounts.length, 'total']], counts: countStatuses(accounts), listTitle: 'ACCOUNT STATUS', rows: accounts.map(a => [a.name, a.district, accountBadge(a), a.status]), note: 'Landmark model pending. No match means no known match in this source.', focus: landmarks.find(l => l.name === name) ? blocks[landmarks.find(l => l.name === name).block] : blocks[0] });
+    const key = { 'Wayne Tower': 'wayne', 'Ace Chemicals': 'ace', 'Arkham Asylum': 'arkham', 'Gotham Bank': 'bank', 'GCPD Headquarters': 'gcpd', 'Cobblepot Manor': 'cobblepot', 'Blackgate Penitentiary': 'blackgate' }[name];
+    if (!key) return;
+    const box = new THREE.Box3().setFromObject(node);
+    sendBatman((box.min.x + box.max.x) / 2, (box.min.z + box.max.z) / 2);
+    landmarkReports[key]();
   }
 });
 
