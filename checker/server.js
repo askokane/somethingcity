@@ -129,11 +129,30 @@ async function googleCallback(req, res) {
 
   // The user can untick Gmail access on the consent screen; then we only have the verified email.
   let inbox = null;
-  if (tokens.scope?.includes("gmail.readonly")) inbox = await scanInbox(tokens.access_token).catch(() => null);
+  let why = "skipped: Gmail access not granted";
+  if (tokens.scope?.includes("gmail.readonly")) inbox = await scanInbox(tokens.access_token).catch((e) => ((why = `failed: ${e.message}`), null));
+  console.log(`google sign-in ${maskEmail(email)}: inbox scan ${inbox ? `found ${inbox.length} services` : why}`);
   fetch(`https://oauth2.googleapis.com/revoke?token=${tokens.access_token}`, { method: "POST" }).catch(() => {}); // one scan, then let go
 
   back(inbox ? "ok" : "no-inbox", { "set-cookie": [startSession(email, inbox), cookie("bc_oauth", "", 0)] }).end();
 }
+
+// --- Dev test page: sign in with Google and list linked accounts, no frontend needed ---
+// Set FRONTEND_URL=http://localhost:8787/dev to land here after Google sign-in.
+const DEV_PAGE = `<!doctype html><meta charset="utf-8"><title>Breach City checker</title>
+<body style="font:14px ui-monospace,monospace;max-width:900px;margin:2rem auto;padding:0 1rem">
+<h1 style="font-size:18px">Breach City checker (dev)</h1>
+<p><a href="/auth/google">Sign in with Google</a> · <a href="#" id="logout">Sign out</a></p>
+<pre id="out">Checking…</pre>
+<script type="module">
+const post = (p) => fetch(p, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+document.getElementById("logout").onclick = async (e) => { e.preventDefault(); await post("/api/logout"); location.href = "/dev"; };
+const r = await post("/api/check").then((x) => x.json());
+document.getElementById("out").textContent = r.status
+  ? \`\${r.label}: \${r.status} (\${r.source})\${r.error ? " - " + r.error : ""}\\n\${r.accounts.length} linked accounts, \${r.accounts.filter((a) => a.breached).length} breached\\n\\n\` +
+    r.accounts.map((a) => \`\${a.breached ? "BREACHED" : "ok      "}  \${a.name.slice(0, 28).padEnd(28)} \${a.domain.padEnd(26)} \${a.foundIn.join("+").padEnd(13)} \${a.firstSeen ?? ""}\`).join("\\n")
+  : (r.error ?? "Not signed in.");
+</script>`;
 
 // --- Live check for the signed-in email ---
 
@@ -156,6 +175,7 @@ export const server = http.createServer(async (req, res) => {
   const path = req.url.split("?")[0];
 
   try {
+    if (req.method === "GET" && path.startsWith("/dev")) return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(DEV_PAGE);
     if (req.method === "GET" && path === "/auth/google") return googleStart(res);
     if (req.method === "GET" && path === "/auth/google/callback") return await googleCallback(req, res);
     if (req.method === "GET" && path === "/api/timeline") {

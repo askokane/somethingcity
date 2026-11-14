@@ -48,13 +48,22 @@ export function baseDomain(host) {
   return parts.slice(-n).join(".");
 }
 
+// ponytail: one service per name, ignoring TLD and mail-only suffixes, so facebookmail.com = facebook.com and
+// hinge.co = hinge.com. Two unrelated companies sharing a name on different TLDs would merge; rare enough here.
+/** "facebookmail.com" -> "facebook", "samsung-mail.com" -> "samsung", "ucas.ac.uk" -> "ucas" */
+export function serviceKey(domain) {
+  const label = String(domain).split(".")[0];
+  const stripped = label.replace(/-?(mail|email|notice|notify)$/, "");
+  return stripped.length >= 3 ? stripped : label;
+}
+
 /** Merge inbox-found services with breached services into one list, breached first. */
 export function toAccounts(breaches, inbox = []) {
-  const byDomain = new Map(inbox.map((a) => [a.domain, { ...a, breached: false, breaches: [], foundIn: ["inbox"] }]));
+  const byDomain = new Map(inbox.map((a) => [serviceKey(a.domain), { ...a, breached: false, breaches: [], foundIn: ["inbox"] }]));
   for (const b of breaches) {
     if (!b.domain) continue; // e.g. stealer-log dumps aren't a service account
-    let a = byDomain.get(b.domain);
-    if (!a) byDomain.set(b.domain, (a = { name: b.name, domain: b.domain, firstSeen: null, breached: false, breaches: [], foundIn: ["breach"] }));
+    let a = byDomain.get(serviceKey(b.domain));
+    if (!a) byDomain.set(serviceKey(b.domain), (a = { name: b.name, domain: b.domain, firstSeen: null, breached: false, breaches: [], foundIn: ["breach"] }));
     if (!a.foundIn.includes("breach")) a.foundIn.push("breach");
     a.breached = true;
     a.breaches.push(b.name);

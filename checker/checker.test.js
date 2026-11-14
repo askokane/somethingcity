@@ -36,10 +36,60 @@ assert.deepEqual(sendersToAccounts([
   { from: '"Netflix" <hello@netflix.com>', date: "2019-02-03" },
   { from: "Mom <mom@gmail.com>", date: "2020-01-01" },
   { from: "noreply@github.com", date: null },
+  // Sign in with Google: Google emails you, the account is the named app
+  { from: "Google <no-reply@accounts.google.com>", subject: "You shared some Google Account data with Canva", date: "2026-11-14" },
+  { from: "Google <no-reply@accounts.google.com>", subject: "You shared some Google Account info with Spotify.", date: "2026-11-14" },
+  { from: "Google <no-reply@accounts.google.com>", subject: "Welcome to Google on your new phone", date: "2026-11-13" },
 ]), [
   { name: "Netflix", domain: "netflix.com", firstSeen: "2019-02-03" },
-  { name: "github", domain: "github.com", firstSeen: null },
+  { name: "Github", domain: "github.com", firstSeen: null },
+  { name: "Canva", domain: "canva.com", firstSeen: "2026-11-14" },
+  { name: "Spotify", domain: "spotify.com", firstSeen: "2026-11-14" },
+  { name: "Google", domain: "google.com", firstSeen: "2026-11-13" },
 ]);
+
+// Cleanup cases from a real 145-account inbox
+const real = sendersToAccounts([
+  { from: "Google <no-reply@accounts.google.com>", subject: "You shared some Google Account data with chegg.com", date: "2026-11-13" },
+  { from: "Facebook <security@facebookmail.com>", date: "2026-06-27" },
+  { from: "Facebook <notification@facebook.com>", date: "2026-06-20" },
+  { from: "SHEIN <noreply@sheinnotice.com>", date: "2025-03-03" },
+  { from: "SHEIN <hello@shein.com>", date: "2025-03-05" },
+  { from: "Hinge Team <hello@hinge.co>", date: "2026-02-06" },
+  { from: "Hinge <hello@hinge.com>", date: "2026-08-29" },
+  { from: "Greene-Havas, Maia <mgh@vt.edu>", date: "2025-03-05" },
+  { from: "Amazon Prime <prime@amazon.com>", date: "2025-08-19" },
+  { from: "26/WN-SOC-121-IN3 Introduction <notifications@instructure.com>", date: "2025-12-15" },
+  { from: "Zeno Rocha <zeno@resend.com>", date: "2026-06-19" },
+  // Brands on unrelated domains keep their own names
+  { from: "American Airlines <aa@aa.com>", date: "2025-11-17" },
+  { from: "TurboTax <turbotax@intuit.com>", date: "2026-02-12" },
+  { from: "Linktree <hello@linktr.ee>", date: "2024-08-19" },
+  { from: "Michigan State University <admissions@msu.edu>", date: "2024-12-02" },
+  { from: "Canon ID <noreply@myid.canon>", date: "2025-05-02" },
+  { from: "The Browser Company <hello@arc.net>", date: "2026-08-05" },
+]);
+const byName = Object.fromEntries(real.map((a) => [a.domain, a.name]));
+assert.deepEqual(byName, {
+  "chegg.com": "chegg.com", // a domain-looking app name stays itself, not "cheggcom.com"
+  "facebook.com": "Facebook", // facebookmail.com merged in
+  "shein.com": "SHEIN", // sheinnotice.com merged in
+  "hinge.com": "Hinge", // hinge.co merged in
+  "vt.edu": "VT", // a person's name becomes the service
+  "amazon.com": "Amazon Prime", // brand names that match the domain are kept
+  "instructure.com": "Instructure", // a course code, not a service name
+  "resend.com": "Resend", // a person's name
+  "aa.com": "American Airlines",
+  "intuit.com": "TurboTax",
+  "linktr.ee": "Linktree",
+  "msu.edu": "Michigan State University",
+  "myid.canon": "Canon ID",
+  "arc.net": "The Browser Company",
+});
+assert.equal(real.find((a) => a.domain === "facebook.com").firstSeen, "2026-06-20"); // earliest date across both domains
+// Breach on facebook.com still matches an account found via facebookmail.com
+const { toAccounts } = await import("./checker.js");
+assert.equal(toAccounts([{ name: "Facebook", domain: "facebook.com" }], [{ name: "Facebook", domain: "facebookmail.com", firstSeen: null }]).length, 1);
 
 // Server: verification gate, codes, sessions
 await new Promise((r) => server.listen(0, "localhost", r));
@@ -50,7 +100,9 @@ const gated = await checkAccount("someone@example.com", { endpoint: `${base}/api
 assert.equal(gated.status, "unknown");
 assert.equal(gated.error, "Verify this email first.");
 assert.equal((await fetch(`${base}/api/check`, { method: "POST", body: "{}" })).status, 415);
-assert.equal((await fetch(`${base}/auth/google`)).status, 503); // not configured
+const g = await fetch(`${base}/auth/google`, { redirect: "manual" });
+if (!process.env.GOOGLE_CLIENT_ID) assert.equal(g.status, 503); // not configured
+else assert.ok(g.status === 302 && g.headers.get("location").startsWith("https://accounts.google.com/"));
 const tl = await fetch(`${base}/api/timeline`);
 if (!process.env.DATABASE_URL) assert.equal(tl.status, 503); // not configured
 else {
