@@ -203,6 +203,7 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
     catch (error) { console.warn(`Could not load ${name} building:`, error); return [name, null]; }
   }));
   const models = { generic: gltf.scene, ...Object.fromEntries(variants) };
+  models.villains = (await Promise.all(VILLAINS.map((name) => loadModel(`./models/npcs/${name}.glb`).catch((error) => { console.warn(`Could not load ${name}:`, error); return null; })))).filter(Boolean);
   loadedBuildingModels = models;
   accounts.forEach((account) => {
     if (account.slot < 0) return;
@@ -284,9 +285,39 @@ function addStatusBeacon(root, status, buildingHeight = 6.5) {
   root.userData.statusBeacon = marker;
 }
 
+// Tai's villain figures (models/npcs). Riddler, Batman and Robin have no GLB export yet.
+const VILLAINS = ['gotham_joker', 'gotham_harley_quinn', 'gotham_penguin', 'gotham_poison_ivy'];
+const VILLAIN_HEIGHT = 1.7; // meters, standing on the roof
+
+function syncRooftopVillain(account, root) {
+  if (root.userData.villain) { root.remove(root.userData.villain); root.userData.villain = null; }
+  const villains = loadedBuildingModels?.villains;
+  if (account.status !== 'breached' || !villains?.length) return;
+  const villain = villains[[...(account.name || account.id)].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % villains.length].clone(true);
+  const beacon = root.userData.statusBeacon;
+  if (beacon) root.remove(beacon); // measure the roof, not the beacon floating over it
+  root.updateMatrixWorld(true);
+  const roof = new THREE.Box3().setFromObject(root);
+  if (beacon) root.add(beacon);
+  // Joker is Y-up; Harley, Penguin and Ivy were exported with height along -Z like the props, so stand them up.
+  const raw = new THREE.Box3().setFromObject(villain).getSize(new THREE.Vector3());
+  villain.rotation.order = 'YXZ';
+  villain.rotation.set(raw.z > raw.y ? Math.PI / 2 : 0, Math.PI / 4, 0); // face the isometric camera
+  villain.scale.setScalar(VILLAIN_HEIGHT / Math.max(raw.y, raw.z));
+  villain.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(villain);
+  const center = bounds.getCenter(new THREE.Vector3());
+  const roofCenter = roof.getCenter(new THREE.Vector3());
+  villain.position.set(roofCenter.x - center.x, roof.max.y - bounds.min.y, roofCenter.z - center.z);
+  villain.traverse((node) => { node.userData.accountId = account.id; if (node.isMesh) node.castShadow = true; });
+  root.attach(villain); // keep world placement under the scaled building
+  root.userData.villain = villain;
+}
+
 function applyBuildingState(account) {
   const root = renderedBuildings.get(account.id);
   if (!root) return;
+  syncRooftopVillain(account, root);
   const color = new THREE.Color(statusColors[account.status]);
   const beacon = root.userData.statusBeacon;
   if (beacon) beacon.traverse((node) => { if (node.isMesh && node.material) { node.material.color.copy(color); if (node.material.emissive) node.material.emissive.copy(color); } });
