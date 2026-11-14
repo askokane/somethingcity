@@ -5,7 +5,7 @@ import { getCatalog } from "./sources.js";
 let sql;
 async function db() {
   if (!process.env.DATABASE_URL) return null;
-  if (!sql) sql = (await import("postgres")).default(process.env.DATABASE_URL);
+  if (!sql) sql = (await import("postgres")).default(process.env.DATABASE_URL, { onnotice: () => {}, idle_timeout: 10 });
   return sql;
 }
 

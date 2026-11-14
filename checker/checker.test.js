@@ -51,7 +51,13 @@ assert.equal(gated.status, "unknown");
 assert.equal(gated.error, "Verify this email first.");
 assert.equal((await fetch(`${base}/api/check`, { method: "POST", body: "{}" })).status, 415);
 assert.equal((await fetch(`${base}/auth/google`)).status, 503); // not configured
-assert.equal((await fetch(`${base}/api/timeline`)).status, 503); // not configured
+const tl = await fetch(`${base}/api/timeline`);
+if (!process.env.DATABASE_URL) assert.equal(tl.status, 503); // not configured
+else {
+  const years = await tl.json(); // Tiger Data, loaded with `npm run load-timeline`
+  assert.ok(years.length > 5 && years.every((y) => y.year > 1990 && y.breaches > 0));
+  console.log(`timeline: ${years.length} years, ${years.reduce((n, y) => n + y.breaches, 0)} breaches`);
+}
 
 const printed = [];
 const log = console.log;
