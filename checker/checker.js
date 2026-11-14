@@ -89,7 +89,7 @@ export function toAccounts(breaches, inbox = [], serviceMap = new Map()) {
 }
 
 /**
- * A short, calm to-do list for one breach, from what leaked. Works offline; use it when /api/explain (Gemini) isn't available.
+ * A short, calm to-do list for one breach, from what leaked. Works offline; this is the advice shown in the detail panel.
  * mine: true if the user's email was in this breach, false if only the service was breached.
  */
 export function nextSteps(service, exposedData = [], mine = true) {

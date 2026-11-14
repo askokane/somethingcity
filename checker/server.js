@@ -1,5 +1,5 @@
 // Breach City live checker server. Run: node checker/server.js
-// Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PORT
+// Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PUBLIC_URL, PORT
 import http from "node:http";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { accountId, lookupDomains, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
@@ -7,8 +7,12 @@ import { checkXon, getCatalog, scanInbox } from "./sources.js";
 import { news, personalTimeline, serviceBreaches, timeline } from "./db.js";
 
 const PORT = Number(process.env.PORT) || 8787;
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:8000";
-const REDIRECT_URI = `http://localhost:${PORT}/auth/google/callback`;
+// Deployed (see DEPLOY.md): PUBLIC_URL=https://your-domain, with Caddy serving the frontend and proxying here on the same origin.
+const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
+const FRONTEND_URL = process.env.FRONTEND_URL || PUBLIC_URL || "http://localhost:8000"; // the frontend (serve.ps1) runs on 8000
+const REDIRECT_URI = `${PUBLIC_URL || `http://localhost:${PORT}`}/auth/google/callback`;
+const SECURE = PUBLIC_URL.startsWith("https://"); // cookies only over HTTPS once deployed
+const DEV_PAGE_ON = !PUBLIC_URL || process.env.DEV_PAGE === "1"; // /dev is a local test page, off on a public server
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const MIN = 60e3;
 
@@ -19,7 +23,27 @@ const oauthStates = new Map(); // state -> expires
 
 const sha = (s) => createHash("sha256").update(s).digest();
 const json = (res, status, body, headers = {}) => res.writeHead(status, { "content-type": "application/json", ...headers }).end(JSON.stringify(body));
-const cookie = (name, value, maxAge) => `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+const cookie = (name, value, maxAge) => `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${SECURE ? "; Secure" : ""}`;
+
+// Per-IP rate limit for the endpoint a stranger could abuse on a public server (sending code emails).
+// Behind Caddy every request comes from loopback, so trust X-Forwarded-For only then.
+// ponytail: in-memory fixed windows, single process; fine for a demo server.
+const hits = new Map(); // "bucket:ip" -> { count, resetAt }
+function clientIp(req) {
+  const remote = req.socket.remoteAddress ?? "";
+  const loopback = remote === "::1" || remote.startsWith("127.") || remote === "::ffff:127.0.0.1";
+  return (loopback && req.headers["x-forwarded-for"]?.split(",")[0].trim()) || remote;
+}
+function limited(req, bucket, max, windowMs) {
+  const key = `${bucket}:${clientIp(req)}`;
+  const now = Date.now();
+  const h = hits.get(key);
+  if (!h || h.resetAt < now) {
+    hits.set(key, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+  return ++h.count > max;
+}
 const readCookie = (req, name) => req.headers.cookie?.match(new RegExp(`(?:^|; )${name}=([^;]+)`))?.[1];
 
 function getSession(req) {
@@ -102,16 +126,24 @@ function googleStart(res) {
 
 async function googleCallback(req, res) {
   const back = (result, headers = {}) => res.writeHead(302, { location: `${FRONTEND_URL}/?signin=${result}`, ...headers });
+  // Failures say why, in the log and as a short ?reason= code for the page (no personal data in either).
+  const fail = (reason, why) => {
+    console.warn(`[oauth] google sign-in failed (${reason}): ${why}`);
+    return back(`failed&reason=${reason}`, { "set-cookie": cookie("bc_oauth", "", 0) }).end(); // clear the used sign-in cookie
+  };
   const params = new URL(req.url, "http://localhost").searchParams;
+  if (params.get("error")) return fail("cancelled", `Google returned "${params.get("error")}" (cancelled, or not a test user)`);
   const state = params.get("state");
-  const valid = state && state === readCookie(req, "bc_oauth") && oauthStates.get(state) > Date.now();
+  const cookieState = readCookie(req, "bc_oauth");
+  const known = oauthStates.get(state) > Date.now();
   oauthStates.delete(state);
-  if (!valid || !params.get("code")) {
-    const providerError = params.get("error");
-    const providerCode = providerError && /^[a-z_]+$/i.test(providerError) ? providerError : null;
-    console.warn(`[oauth] callback rejected: ${providerCode || (valid ? "missing_code" : "invalid_state")}`);
-    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
+  if (!state || !params.get("code")) return fail("state", "Google's reply had no state or code");
+  if (state !== cookieState) {
+    return fail("state", cookieState
+      ? "sign-in started in another tab or browser; try again"
+      : `sign-in cookie missing: start from ${PUBLIC_URL || `http://localhost:${PORT}`} (not 127.0.0.1), same browser, cookies allowed`);
   }
+  if (!known) return fail("state", "sign-in expired or the server restarted mid-sign-in; try again");
 
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -124,30 +156,17 @@ async function googleCallback(req, res) {
     }),
     signal: AbortSignal.timeout(10000),
   }).catch(() => null);
-  if (!tokenRes) {
-    console.warn("[oauth] token exchange failed: network_error");
-    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
-  }
-  if (!tokenRes.ok) {
-    const body = await tokenRes.json().catch(() => ({}));
-    const reason = /^[a-z_]+$/i.test(body.error || "") ? body.error : `http_${tokenRes.status}`;
-    console.warn(`[oauth] token exchange failed: ${reason}`);
-    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
-  }
-  const tokens = await tokenRes.json().catch(() => null);
-  if (!tokens?.id_token) {
-    console.warn("[oauth] token response missing id_token");
-    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
-  }
+  if (!tokenRes) return fail("token", "couldn't reach Google's token endpoint");
+  const tokens = await tokenRes.json().catch(() => ({}));
+  // Google's error code (e.g. invalid_client = wrong GOOGLE_CLIENT_SECRET, redirect_uri_mismatch) is safe to log
+  const googleError = /^[a-z_]+$/i.test(tokens.error || "") ? tokens.error : "";
+  if (!tokenRes.ok || !tokens.id_token) return fail("token", `Google token exchange ${tokenRes.status} ${googleError}: check GOOGLE_CLIENT_ID/SECRET in .env (no spaces or quotes)`);
 
   // Straight from Google's token endpoint over TLS, so the signature check can be skipped (OIDC Core 3.1.3.7).
   const claims = JSON.parse(Buffer.from(tokens.id_token.split(".")[1], "base64url").toString());
   const email = normalizeEmail(claims.email);
-  if (claims.aud !== process.env.GOOGLE_CLIENT_ID || !claims.email_verified || !email) {
-    const reason = claims.aud !== process.env.GOOGLE_CLIENT_ID ? "client_id_mismatch" : !claims.email_verified ? "email_not_verified" : "invalid_email_claim";
-    console.warn(`[oauth] identity validation failed: ${reason}`);
-    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
-  }
+  if (claims.aud !== process.env.GOOGLE_CLIENT_ID) return fail("token", "token was issued for a different client ID");
+  if (!claims.email_verified || !email) return fail("account", "this Google account has no verified email");
 
   // The user can untick Gmail access on the consent screen; then we only have the verified email.
   let inbox = null;
@@ -175,56 +194,20 @@ body>*{max-width:900px;margin-left:auto;margin-right:auto}h1{margin:36px auto 10
 <script type="module">
 const post = (p) => fetch(p, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
 document.getElementById("logout").onclick = async (e) => { e.preventDefault(); await post("/api/logout"); location.href = "/dev"; };
-const signin = new URLSearchParams(location.search).get("signin");
-const r = signin === "failed" ? { error: "Google sign-in did not complete. Check the checker server output for a safe [oauth] reason." } : await post("/api/check").then((x) => x.json());
-document.getElementById("out").textContent = r.status
+const q = new URLSearchParams(location.search);
+const hints = {
+  state: "Start sign-in from this page at http://localhost:8787/dev (not 127.0.0.1), in one tab, and don't restart the server mid-way.",
+  cancelled: "Google sign-in was cancelled, or this Google account isn't a test user in Google Cloud.",
+  token: "Google rejected the app's credentials: check GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in checker/.env.",
+  account: "This Google account has no verified email.",
+};
+const failed = q.get("signin") === "failed" ? \`Sign-in failed: \${hints[q.get("reason")] ?? "check the checker server output for an [oauth] reason."}\\n\\n\` : "";
+const r = await post("/api/check").then((x) => x.json());
+document.getElementById("out").textContent = failed + (r.status
   ? \`\${r.label}: \${r.status} (\${r.source})\${r.error ? " - " + r.error : ""}\\n\${r.accounts.length} linked accounts, \${r.accounts.filter((a) => a.breached).length} with your data breached, \${r.accounts.filter((a) => !a.breached && a.serviceBreaches?.length).length} more on breached services\\n\\n\` +
     r.accounts.map((a) => \`\${a.breached ? "BREACHED" : a.serviceBreaches?.length ? "SERVICE " : "ok      "}  \${a.name.slice(0, 28).padEnd(28)} \${a.domain.padEnd(26)} \${a.foundIn.join("+").padEnd(13)} \${(a.firstSeen ?? "").padEnd(11)} \${(a.serviceBreaches ?? []).map((b) => b.name + " " + b.date.slice(0, 4)).join(", ")}\`).join("\\n")
-  : (r.error === "Verify this email first." ? "No active Google session. Choose Sign in with Google, then approve the account access prompt." : (r.error ?? "Not signed in."));
+  : (r.error === "Verify this email first." ? "No active Google session. Choose Sign in with Google, then approve the account access prompt." : (r.error ?? "Not signed in.")));
 </script>`;
-
-// --- Gemini: plain-English "what this means for you" for one breach (Gemini prize) ---
-// Sends only public breach metadata (service, date, data types). Never an email, account list or inbox content.
-const explainCache = new Map(); // ponytail: unbounded, but keyed by public breach metadata (a few hundred at most)
-
-async function explain(body) {
-  const { name, date = null, exposedData = [], mine = true } = body;
-  const okText = (s, max) => typeof s === "string" && s.length > 0 && s.length <= max;
-  if (!okText(name, 100) || (date !== null && !okText(date, 20)) || !Array.isArray(exposedData) || exposedData.length > 30 ||
-      !exposedData.every((d) => okText(d, 60)) || typeof mine !== "boolean") return [400, { error: "Bad breach details." }];
-  if (!process.env.GEMINI_API_KEY) return [503, { error: "Explanations aren't configured." }];
-
-  const key = JSON.stringify([name, date, exposedData, mine]);
-  if (explainCache.has(key)) return [200, explainCache.get(key)];
-  const prompt = `Explain this data breach to a non-technical person, calmly and without hype.
-Service: ${name}
-Breach date: ${date ?? "unknown"}
-Data types exposed: ${exposedData.join(", ") || "unknown"}
-${mine ? "Their email address was found in this breach." : "The service was breached, but their email address was NOT found in the leaked data. Do not say their data leaked."}
-Return JSON: "summary" (2-3 sentences: what happened and what it means for them) and "steps" (3-5 short, concrete actions, most important first). No markdown.`;
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL || "gemini-2.5-flash"}:generateContent`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: { type: "OBJECT", properties: { summary: { type: "STRING" }, steps: { type: "ARRAY", items: { type: "STRING" } } }, required: ["summary", "steps"] },
-      },
-    }),
-    signal: AbortSignal.timeout(20000),
-  }).catch(() => null);
-  console.log(`gemini ${res?.status ?? "no response"}`);
-  try {
-    const out = JSON.parse((await res.json()).candidates[0].content.parts[0].text);
-    if (typeof out.summary !== "string" || !Array.isArray(out.steps)) throw new Error();
-    const result = { summary: out.summary, steps: out.steps.map(String).slice(0, 6), source: "Gemini" };
-    explainCache.set(key, result);
-    return [200, result];
-  } catch {
-    return [502, { error: "Explanation unavailable right now." }]; // frontend falls back to nextSteps()
-  }
-}
 
 // --- Service logos for building signs ---
 // Proxied so the browser never asks xposedornot.com for "the logos of this user's accounts" (that list is personal).
@@ -269,7 +252,7 @@ export const server = http.createServer(async (req, res) => {
   const path = req.url.split("?")[0];
 
   try {
-    if (req.method === "GET" && path.startsWith("/dev")) return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(DEV_PAGE);
+    if (req.method === "GET" && path.startsWith("/dev") && DEV_PAGE_ON) return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(DEV_PAGE);
     if (req.method === "GET" && path === "/api/status") return json(res, 200, { googleConfigured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET), timelineConfigured: Boolean(process.env.DATABASE_URL) });
     if (req.method === "GET" && path === "/auth/google") return googleStart(res);
     if (req.method === "GET" && path === "/auth/google/callback") return await googleCallback(req, res);
@@ -300,7 +283,6 @@ export const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true }, { "set-cookie": cookie("bc_session", "", 0) });
     }
     if (path === "/api/check") return json(res, ...(await check(req, body)));
-    if (path === "/api/explain") return json(res, ...(await explain(body)));
     if (path === "/api/timeline/mine") {
       // POST, not GET: a list of someone's account domains shouldn't sit in URLs or access logs.
       const domains = body.domains;
@@ -311,11 +293,15 @@ export const server = http.createServer(async (req, res) => {
       return rows ? json(res, 200, rows) : json(res, 503, { error: "Timeline unavailable." });
     }
 
+    if (path !== "/api/verify/start" && path !== "/api/verify/confirm") return res.writeHead(404).end();
     const email = normalizeEmail(body.email);
     if (!email) return json(res, 400, { error: "Enter a valid email address." });
-    if (path === "/api/verify/start") return json(res, ...(await verifyStart(email)));
-    if (path === "/api/verify/confirm") return json(res, ...verifyConfirm(email, body.code));
-    res.writeHead(404).end();
+    if (path === "/api/verify/start") {
+      // Per email is already 1/minute; per IP stops one visitor from mailing codes to many addresses.
+      if (limited(req, "codes", 10, 60 * 60e3)) return json(res, 429, { error: "Too many codes requested. Try again later." });
+      return json(res, ...(await verifyStart(email)));
+    }
+    return json(res, ...verifyConfirm(email, body.code));
   } catch {
     if (!res.headersSent) json(res, 500, { error: "Something went wrong." }); // no details: they could contain user data
   }
@@ -323,10 +309,8 @@ export const server = http.createServer(async (req, res) => {
 
 if (import.meta.main) {
   server.listen(PORT, "localhost", () => {
-    console.log(`Breach City checker on http://localhost:${PORT}`);
+    console.log(`Breach City checker on http://localhost:${PORT}${PUBLIC_URL ? ` (public: ${PUBLIC_URL}, /dev ${DEV_PAGE_ON ? "on" : "off"})` : ""}`);
     console.log(`  email codes: ${process.env.RESEND_API_KEY ? "sent with Resend" : "printed here (no RESEND_API_KEY)"}`);
     console.log(`  Google sign-in + inbox scan: ${process.env.GOOGLE_CLIENT_ID ? "on" : "off (no GOOGLE_CLIENT_ID)"}`);
-    console.log(`  Tiger Data timeline + service breaches: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL; using in-memory catalog)"}`);
-    console.log(`  Gemini explanations: ${process.env.GEMINI_API_KEY ? "on" : "off (no GEMINI_API_KEY; frontend uses nextSteps())"}`);
-  });
+    console.log(`  Tiger Data timeline + service breaches: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL; using in-memory catalog)"}`);  });
 }
