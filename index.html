@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#11161d" />
+    <title>Breach City — Gotham Ward</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="city-stats.css" />
+    <script type="importmap">
+      { "imports": {
+        "three": "./vendor/three/build/three.module.js",
+        "three/addons/": "./vendor/three/examples/jsm/"
+      } }
+    </script>
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <a class="brand" href="#" aria-label="Breach City home"><span class="brand-mark">B</span><span class="brand-word">BREACH<span>CITY</span></span></a>
+        <span class="ward-tag"><i></i> GOTHAM · CENTRAL WARD</span>
+        <div class="header-actions"><span class="demo-label">LOCAL DEMO</span><button class="header-button" id="reset-button" type="button" title="Reset demo">↺</button><button class="run-button" id="check-button" type="button"><span>↻</span> Run checks</button></div>
+      </header>
+
+      <nav class="main-nav" aria-label="Main navigation"><button class="nav-link is-active" data-view="overview" type="button">City</button><button class="nav-link" data-view="accounts" type="button">Accounts</button><button class="nav-link" data-view="inbox" type="button">Inbox scan</button><button class="nav-link" data-view="timeline" type="button">Timeline</button><span class="service-status" id="service-status">DEMO MODE</span><button class="nav-link nav-check" id="nav-check" type="button">Check</button><button class="nav-google" id="google-button" type="button">Google sign in</button></nav>
+      <section class="page-heading">
+        <div><p class="eyebrow">DIGITAL EXPOSURE / CITY VIEW</p><h1>A city built from <em>your accounts.</em></h1></div>
+        <p class="heading-note">Select a building to open its report and smoothly focus it.<br /><span>Drag to pan · scroll to zoom</span></p>
+      </section>
+
+      <section class="stats-strip" aria-label="City status overview">
+        <div class="stat-cell"><span>MONITORED</span><strong id="total-count">09</strong><small>account buildings</small></div>
+        <div class="stat-cell"><span>NO KNOWN MATCH</span><strong class="stat-clear" id="clear-count">03</strong><small>in this source</small></div>
+        <div class="stat-cell"><span>KNOWN BREACH</span><strong class="stat-breached" id="breached-count">03</strong><small>review reports</small></div>
+        <div class="stat-cell"><span>UNAVAILABLE</span><strong class="stat-unknown" id="unknown-count">03</strong><small>check again later</small></div>
+        <div class="checked-cell"><span class="pulse-dot"></span><div><span>LAST CHECK</span><strong id="last-check">TODAY · 10:42 AM</strong></div></div>
+      </section>
+
+      <section class="dashboard" aria-label="Interactive 3D city dashboard">
+        <div class="city-stage" id="city-stage">
+          <div class="stage-topline"><span><i class="north-star">✳</i> WARD 04 <b>/</b> RIVER DISTRICT</span><button id="camera-button" type="button" aria-label="Reset camera view">⌖ <span>RESET VIEW</span></button></div>
+          <div id="city-scene" class="city-scene" aria-label="Interactive 3D Gotham city scene"></div>
+          <div class="loading-overlay" id="loading-overlay"><span class="loading-mark">B</span><strong>RAISING THE CITY</strong><small>Loading Blender buildings…</small></div>
+          <div class="scene-caption"><span><i class="legend-building"></i> ACCOUNT BUILDINGS</span><span><i class="legend-river"></i> GOTHAM RIVER</span><span><i class="legend-road"></i> CITY STREETS</span></div>
+          <div class="scene-controls"><span>ISOMETRIC VIEW</span><span>1 UNIT = 1 METER</span></div>
+        </div>
+
+        <aside class="dashboard-panel">
+          <section class="directory">
+            <div class="panel-heading"><div><p class="eyebrow">MONITORED ACCOUNTS</p><h2>City directory <small id="account-total">09</small></h2></div><button class="add-button" id="add-button" type="button" aria-label="Add account">+</button></div>
+            <div class="directory-filter"><span>ALL DISTRICTS</span><span>STATUS <b>⌄</b></span></div>
+            <ul class="account-list" id="account-list" aria-label="Accounts"></ul>
+            <p class="privacy-note"><span>◇</span> Demo data only · No passwords collected</p>
+          </section>
+          <section class="report-panel" id="detail-panel" aria-live="polite">
+            <div class="report-kicker"><p class="eyebrow">SELECTED BUILDING</p><span class="report-id" id="report-id">BC—001</span></div>
+            <div class="report-heading"><div class="report-glyph" id="report-glyph">⌂</div><div><h2 id="detail-name">Northpoint Exchange</h2><p id="detail-label">a***@northpoint.test</p></div></div>
+            <div class="report-status" id="detail-status"><span class="status-symbol">✓</span><span>No known match in this source</span></div>
+            <div class="report-meta"><div><span>CHECK SOURCE</span><strong id="detail-source">Demo fixture</strong></div><div><span>LAST CHECK</span><strong id="detail-checked">10:42 AM</strong></div></div>
+            <div class="incident-block" id="incident-block" hidden><div class="incident-title"><span>⚑</span> MATCH DETAILS</div><div id="incident-content"></div></div>
+            <div class="action-block"><p class="eyebrow">RECOMMENDED NEXT STEPS</p><ul><li>Use a unique password for this service.</li><li>Turn on multi-factor authentication.</li><li>Review recent account activity.</li></ul><small>These are suggestions. Breach City has not changed the account.</small></div>
+          </section>
+        </aside>
+      </section>
+
+      <footer class="page-footer"><span>BREACH CITY <i>·</i> YOUR DIGITAL FOOTPRINT, MADE VISIBLE</span><span>RESULTS REFLECT THE SELECTED SOURCE ONLY</span></footer>
+      <section class="feature-drawer" id="feature-drawer" hidden aria-live="polite"><button class="drawer-close" id="drawer-close" type="button" aria-label="Close view">×</button><div id="feature-content"></div></section>
+      <section class="verify-modal" id="verify-modal" hidden><form class="verify-card" id="verify-form"><button class="drawer-close" id="verify-close" type="button" aria-label="Close">×</button><p class="eyebrow">OWNERSHIP CHECK</p><h2>Check an account</h2><p>Use a demo address for an offline preview, or verify an address you own to run a live breach check.</p><div class="demo-shortcuts"><button type="button" data-demo="breached@demo.test">Breached demo</button><button type="button" data-demo="clear@demo.test">Clear demo</button><button type="button" data-demo="unknown@demo.test">Unknown demo</button></div><label for="verify-email">Email address</label><input id="verify-email" type="email" autocomplete="email" required placeholder="you@example.com" /><label for="verify-code" id="code-label" hidden>6 digit email code</label><input id="verify-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" hidden /><p class="form-error" id="verify-error" role="alert"></p><div class="verify-actions"><button class="header-button" id="send-code" type="button">Send verification code</button><button class="run-button" id="submit-check" type="submit">Run check</button></div><small>We only display your masked address. We never ask for passwords.</small></form></section>
+      <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      <div class="city-stats-backdrop" id="city-stats" hidden>
+        <section class="city-stats-dialog" role="dialog" aria-modal="true" aria-labelledby="city-stats-title" tabindex="-1">
+          <div class="city-stats-phone-notch" aria-hidden="true"><span></span></div>
+          <div class="city-stats-screen">
+          <div class="city-stats-phonebar" aria-hidden="true"><span>GOTHAM / 04</span><span>DEMO</span></div>
+          <button class="city-stats-close" id="city-stats-close" type="button" aria-label="Close account statistics">X</button>
+          <p class="eyebrow">ACCOUNT MONITOR</p>
+          <h2 id="city-stats-title">Account overview</h2>
+          <p class="city-stats-subtitle" id="city-stats-subtitle">All monitored accounts</p>
+          <div class="city-stats-cards" id="city-stats-cards"></div>
+          <div class="city-stats-bar" id="city-stats-bar" aria-label="Account status distribution"></div>
+          <p class="city-stats-list-title">ACCOUNT STATUS <span id="city-stats-list-total"></span></p>
+          <ul class="city-stats-list" id="city-stats-list"></ul>
+          <p class="city-stats-note">No match means no known match in this sample source.</p>
+          </div>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

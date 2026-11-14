@@ -1,50 +1,57 @@
 # Breach City
 
-**See your digital exposure as a city.** Prove you own an email, and every website linked to it becomes a skyscraper with its name on it. Red means your data leaked in that service's breach, amber means the service was breached without your email in the leak, and calm means no known breach. Special Gotham landmarks hold the dashboard: your score, what leaked, what to fix first, and breach news.
+**See your digital exposure as a city.** Breach City turns a verified account check into an interactive isometric Gotham city. Each linked service is represented in the dashboard, while Blender-built blocks, account towers, landmarks, and street details give the city its shape.
 
-Hackathon project (Emory Hacks). The plan, privacy rules and demo script are in [planning.md](planning.md).
+Hackathon project for Emory Hacks. The plan and privacy rules are in [planning.md](planning.md).
 
-## Who owns what
+## Run locally
 
-| Area | Owner | Where | Start here |
-|---|---|---|---|
-| Backend: accounts, breach checks, stats, news | Justin | [`checker/`](checker/) | [checker/README.md](checker/README.md): the **frontend guide** |
-| Account buildings + Gotham landmarks (Blender) | Daniel | [`models/buildings/`](models/buildings/) | the `*-handoff.md` files next to each model |
-| City world, streets, NPCs, UI visuals | Tai | [`models/everything-else/`](models/everything-else/), [`models/npcs/`](models/npcs/) | [city-schematic-metrics.md](city-schematic-metrics.md) |
-| Frontend + integration + demo | Atharva | (not in the repo yet) | [Atharva-instructions.md](Atharva-instructions.md) |
+Requires Node.js 22 or newer for the optional checker service. From PowerShell in this folder, start the static app:
 
-Each person's brief: [Justin](Justin-instructions.md) · [Daniel](Daniel-instructions.md) · [Tai](Tai-instructions.md) · [Atharva](Atharva-instructions.md)
+```powershell
+powershell -ExecutionPolicy Bypass -File .\serve.ps1
+```
 
-## Run it
+Open <http://localhost:8000/> in a WebGL-capable browser. The dashboard and offline demo fixtures run without a build step or network access.
 
-**Backend** (Node 22.18+ or 24):
+To enable email verification, Google sign-in, Gmail account discovery, or the public breach timeline, start the checker in another terminal:
 
-```bash
+```powershell
 cd checker
 npm install
 npm start
 ```
 
-It serves `http://localhost:8787`. Get the shared `checker/.env` (Google, Tiger Data and other keys) from Justin privately; it's gitignored. Without it, the server still runs, and the demo accounts work offline anyway.
+The checker listens on port 8787. Configure optional credentials in the gitignored `checker/.env`: Google OAuth for Google sign-in and Gmail scans, `RESEND_API_KEY` to deliver email codes, and `DATABASE_URL` for the Tiger Data features. Without a mail provider, verification codes are printed in the checker console. See [checker/README.md](checker/README.md) for details.
 
-**Frontend:** serve the repo root over HTTP on `localhost`, e.g. `python -m http.server 5173 --bind localhost`, and open it at `http://localhost:5173/…`. Import the backend helpers from `checker/checker.js`.
+## Explore the city
 
-**For the demo, use `city@demo.test`:** 20 real services with real breach history, fully offline, no server needed.
+- Drag to pan and scroll to zoom. Use **Reset view** to return to the city overview.
+- Select a directory entry or a building to open its account report and focus the camera.
+- Open the account directory, inbox scan, or breach timeline from the navigation.
+- Use **Check** to verify an email address. The demo addresses `breached@demo.test`, `clear@demo.test`, and `unknown@demo.test` use offline fixtures.
+- Use **Google sign in** to verify ownership and optionally scan Gmail headers when OAuth is configured.
+- Select **Reset** to restore the sample accounts.
 
-## Building the frontend: the 30-second version
+The dashboard does not collect passwords. A clear result means that the selected source returned no known match.
 
-```js
-import { checkAccount, cityLayout, summarize } from "./checker/checker.js";
-const result = await checkAccount("city@demo.test");      // or a live check, see the guide
-const { buildings, district } = cityLayout(result);         // skyscrapers: label, state (red/amber/calm), height, logo
-const stats = summarize(result);                            // landmark numbers: score, fix-first list, what leaked…
-```
+## Blender city and account buildings
 
-- **Guide and screen map** (which building shows what): [checker/README.md](checker/README.md)
-- **Types**, for editor autocomplete: [checker/checker.d.ts](checker/checker.d.ts)
-- **Real example responses**, to build without running anything: [checker/samples/](checker/samples/)
+The environment in `models/everything-else/gotham_ward_environment.blend` is authored in Blender and exported to `gotham_ward_environment.glb`. It contains the 3×3 block layout, evenly spaced streets, surrounding buildings, river, bridges, park, and lamps. The source generator is `models/everything-else/build_gotham_ward.py`.
 
-## Open questions for the team
+The runtime loads Blender GLB models for the environment, crosswalks, stoplights, lamps, trees, bushes, hydrants, and account buildings. It does not generate a procedural city or substitute procedural buildings if an asset fails to load. Some prop exports need an axis correction when placed into the app's Y-up world.
 
-- **Plot grid size:** [city-schematic-metrics.md](city-schematic-metrics.md) plans a 3×3 grid of 9 plots, from when each *email* was one building. The city is now one skyscraper per *website*: up to 48, plus a "+N more" district and the 8 landmarks. Tai and Atharva should agree on a larger grid, or streets of plots.
-- **Landmark models:** Wayne Tower, Arkham Asylum and Ace Chemicals exist in `models/buildings/`. The other five landmarks (Gotham Bank, GCPD HQ, Blackgate, Cobblepot Manor, Elliot Memorial) need a model or a placeholder.
+Account building style is selected deterministically from the account ID, so the same login keeps its style between loads. The available styles use the generic Gotham tower, Wayne Tower, and Ace Chemicals assets. Arkham Asylum occupies a reserved landmark block. Account buildings and the Arkham landmark use the updated in-map scales.
+
+## Project areas
+
+| Area | Owner | Files |
+|---|---|---|
+| Checker service and browser helpers | Justin | `checker/` |
+| Account buildings and landmarks | Daniel | `models/buildings/` |
+| City environment and street props | Tai | `models/everything-else/`, `city-schematic-metrics.md` |
+| Frontend and integration | Atharva | `app.js`, `index.html`, `styles.css`, `city-stats.css` |
+
+See [checker/README.md](checker/README.md) for the checker frontend guide and [integration-handoff.md](integration-handoff.md) for the current integration contract. The app uses Three.js 0.171.0 modules in `vendor/three/`; see `vendor/three/LICENSE`.
+
+This prototype is not affiliated with DC or Warner Bros.

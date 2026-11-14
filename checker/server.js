@@ -7,7 +7,7 @@ import { checkXon, getCatalog, scanInbox } from "./sources.js";
 import { news, personalTimeline, serviceBreaches, timeline } from "./db.js";
 
 const PORT = Number(process.env.PORT) || 8787;
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:8000";
 const REDIRECT_URI = `http://localhost:${PORT}/auth/google/callback`;
 const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
 const MIN = 60e3;
@@ -106,7 +106,12 @@ async function googleCallback(req, res) {
   const state = params.get("state");
   const valid = state && state === readCookie(req, "bc_oauth") && oauthStates.get(state) > Date.now();
   oauthStates.delete(state);
-  if (!valid || !params.get("code")) return back("failed").end();
+  if (!valid || !params.get("code")) {
+    const providerError = params.get("error");
+    const providerCode = providerError && /^[a-z_]+$/i.test(providerError) ? providerError : null;
+    console.warn(`[oauth] callback rejected: ${providerCode || (valid ? "missing_code" : "invalid_state")}`);
+    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
+  }
 
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -119,13 +124,30 @@ async function googleCallback(req, res) {
     }),
     signal: AbortSignal.timeout(10000),
   }).catch(() => null);
-  const tokens = tokenRes?.ok ? await tokenRes.json() : null;
-  if (!tokens?.id_token) return back("failed").end();
+  if (!tokenRes) {
+    console.warn("[oauth] token exchange failed: network_error");
+    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
+  }
+  if (!tokenRes.ok) {
+    const body = await tokenRes.json().catch(() => ({}));
+    const reason = /^[a-z_]+$/i.test(body.error || "") ? body.error : `http_${tokenRes.status}`;
+    console.warn(`[oauth] token exchange failed: ${reason}`);
+    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
+  }
+  const tokens = await tokenRes.json().catch(() => null);
+  if (!tokens?.id_token) {
+    console.warn("[oauth] token response missing id_token");
+    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
+  }
 
   // Straight from Google's token endpoint over TLS, so the signature check can be skipped (OIDC Core 3.1.3.7).
   const claims = JSON.parse(Buffer.from(tokens.id_token.split(".")[1], "base64url").toString());
   const email = normalizeEmail(claims.email);
-  if (claims.aud !== process.env.GOOGLE_CLIENT_ID || !claims.email_verified || !email) return back("failed").end();
+  if (claims.aud !== process.env.GOOGLE_CLIENT_ID || !claims.email_verified || !email) {
+    const reason = claims.aud !== process.env.GOOGLE_CLIENT_ID ? "client_id_mismatch" : !claims.email_verified ? "email_not_verified" : "invalid_email_claim";
+    console.warn(`[oauth] identity validation failed: ${reason}`);
+    return back("failed", { "set-cookie": cookie("bc_oauth", "", 0) }).end();
+  }
 
   // The user can untick Gmail access on the consent screen; then we only have the verified email.
   let inbox = null;
@@ -140,6 +162,12 @@ async function googleCallback(req, res) {
 // --- Dev test page: sign in with Google and list linked accounts, no frontend needed ---
 // Set FRONTEND_URL=http://localhost:8787/dev to land here after Google sign-in.
 const DEV_PAGE = `<!doctype html><meta charset="utf-8"><title>Breach City checker</title>
+<style>
+:root{color-scheme:dark;--ink:#f3f0d1;--muted:#a9c2c0;--line:#416174;--gold:#ffd45e;--teal:#7ce3bd;font-family:"Courier New",monospace;background:#101a25;color:var(--ink)}
+*{box-sizing:border-box}body{max-width:none!important;min-height:100vh;margin:0!important;padding:34px!important;background-color:#101a25;background-image:linear-gradient(#132130 1px,transparent 1px),linear-gradient(90deg,#132130 1px,transparent 1px),radial-gradient(ellipse at 50% 0%,#25475a 0,#152a3a 42%,#101a25 78%);background-size:8px 8px,8px 8px,auto}
+body>*{max-width:900px;margin-left:auto;margin-right:auto}h1{margin:36px auto 10px!important;padding:18px 20px;border:3px solid var(--line);background:#183044;box-shadow:5px 5px 0 #080f16;font-size:clamp(22px,4vw,34px)!important;font-weight:900;text-transform:uppercase;letter-spacing:-.06em}body>p{display:flex;align-items:center;gap:12px;margin-top:0;padding:12px 14px;border:2px solid var(--line);background:#132738;box-shadow:3px 3px 0 #080f16}a{color:var(--teal);font-weight:900;text-decoration:none;text-transform:uppercase}a:hover{color:var(--gold)}a[href="/auth/google"]{padding:10px 13px;border:2px solid #080f16;background:var(--gold);box-shadow:3px 3px 0 #080f16;color:#182431}#logout{padding:9px 12px;border:2px solid var(--line);background:#20394a;color:var(--ink)}pre{min-height:150px;margin-top:18px!important;padding:20px!important;overflow:auto;border:3px solid var(--line);background:#0d202d;color:#dce8dd;box-shadow:5px 5px 0 #080f16;font:12px/1.8 "Courier New",monospace;white-space:pre-wrap}pre::before{content:"WARD 04 / SCAN REPORT";display:block;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--line);color:var(--gold);font-size:10px;letter-spacing:.12em}
+@media(max-width:600px){body{padding:16px!important}h1{margin-top:24px!important}body>p{align-items:stretch;flex-direction:column}body>p::first-line{display:none}}
+</style>
 <body style="font:14px ui-monospace,monospace;max-width:900px;margin:2rem auto;padding:0 1rem">
 <h1 style="font-size:18px">Breach City checker (dev)</h1>
 <p><a href="/auth/google">Sign in with Google</a> · <a href="#" id="logout">Sign out</a></p>
@@ -147,11 +175,12 @@ const DEV_PAGE = `<!doctype html><meta charset="utf-8"><title>Breach City checke
 <script type="module">
 const post = (p) => fetch(p, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
 document.getElementById("logout").onclick = async (e) => { e.preventDefault(); await post("/api/logout"); location.href = "/dev"; };
-const r = await post("/api/check").then((x) => x.json());
+const signin = new URLSearchParams(location.search).get("signin");
+const r = signin === "failed" ? { error: "Google sign-in did not complete. Check the checker server output for a safe [oauth] reason." } : await post("/api/check").then((x) => x.json());
 document.getElementById("out").textContent = r.status
   ? \`\${r.label}: \${r.status} (\${r.source})\${r.error ? " - " + r.error : ""}\\n\${r.accounts.length} linked accounts, \${r.accounts.filter((a) => a.breached).length} with your data breached, \${r.accounts.filter((a) => !a.breached && a.serviceBreaches?.length).length} more on breached services\\n\\n\` +
     r.accounts.map((a) => \`\${a.breached ? "BREACHED" : a.serviceBreaches?.length ? "SERVICE " : "ok      "}  \${a.name.slice(0, 28).padEnd(28)} \${a.domain.padEnd(26)} \${a.foundIn.join("+").padEnd(13)} \${(a.firstSeen ?? "").padEnd(11)} \${(a.serviceBreaches ?? []).map((b) => b.name + " " + b.date.slice(0, 4)).join(", ")}\`).join("\\n")
-  : (r.error ?? "Not signed in.");
+  : (r.error === "Verify this email first." ? "No active Google session. Choose Sign in with Google, then approve the account access prompt." : (r.error ?? "Not signed in."));
 </script>`;
 
 // --- Gemini: plain-English "what this means for you" for one breach (Gemini prize) ---
@@ -241,6 +270,7 @@ export const server = http.createServer(async (req, res) => {
 
   try {
     if (req.method === "GET" && path.startsWith("/dev")) return res.writeHead(200, { "content-type": "text/html; charset=utf-8" }).end(DEV_PAGE);
+    if (req.method === "GET" && path === "/api/status") return json(res, 200, { googleConfigured: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET), timelineConfigured: Boolean(process.env.DATABASE_URL) });
     if (req.method === "GET" && path === "/auth/google") return googleStart(res);
     if (req.method === "GET" && path === "/auth/google/callback") return await googleCallback(req, res);
     if (req.method === "GET" && path === "/api/timeline") {
