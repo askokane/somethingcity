@@ -2,9 +2,10 @@
 
 import bpy
 import math
+from pathlib import Path
 from mathutils import Vector
 
-OUT = "/Users/daniellee/Desktop/somethingcity"
+OUT = Path(__file__).resolve().parent
 
 # Work in a dedicated scene so the user's other Blender scenes stay intact.
 existing = bpy.data.scenes.get("Gotham Voxel Skyscraper")
@@ -206,7 +207,7 @@ scene.render.resolution_x=384
 scene.render.resolution_y=384
 scene.render.resolution_percentage=100
 scene.render.image_settings.file_format='PNG'
-scene.render.filepath=OUT+'/gotham_voxel_skyscraper.png'
+scene.render.filepath=str(OUT / 'gotham_voxel_skyscraper.png')
 scene.view_settings.view_transform='Standard'
 
 # Export only the building and its individually addressable window meshes.
@@ -216,7 +217,7 @@ for obj in bpy.data.objects:
 building.select_set(True)
 for pane in window_panes: pane.select_set(True)
 bpy.context.view_layer.objects.active=building
-bpy.ops.export_scene.gltf(filepath=OUT+'/gotham_voxel_skyscraper.glb',export_format='GLB',use_selection=True,use_active_scene=True,export_yup=True)
-bpy.ops.wm.save_as_mainfile(filepath=OUT+'/gotham_voxel_skyscraper.blend')
+bpy.ops.export_scene.gltf(filepath=str(OUT / 'gotham_voxel_skyscraper.glb'),export_format='GLB',use_selection=True,use_active_scene=True,export_yup=True)
+bpy.ops.wm.save_as_mainfile(filepath=str(OUT / 'gotham_voxel_skyscraper.blend'))
 bpy.ops.render.render(write_still=True)
 print('Created',len(verts),'vertices and',len(faces),'faces; render, GLB, and BLEND saved to',OUT)
