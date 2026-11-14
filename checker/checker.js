@@ -108,6 +108,51 @@ export function nextSteps(service, exposedData = [], mine = true) {
   return steps;
 }
 
+/**
+ * A building-sign name, at most `max` characters, cut at a word boundary:
+ * "The Higgsfield Team" -> "Higgsfield", "Microsoft  Careers" -> "Microsoft", "♟Chess.com" -> "Chess.com".
+ */
+export function shortName(name, max = 14) {
+  let s = String(name).replace(/^[^\p{L}\p{N}]+/u, "").replace(/\s+/g, " ").trim(); // leading emoji/symbols
+  s = s.replace(/^the\s+/i, "").replace(/\s+(team|support|careers|security|account|admissions|inc\.?|llc|ltd\.?)$/i, "") || s;
+  if (s.length <= max) return s;
+  let out = "";
+  for (const w of s.split(" ")) {
+    if ((out ? out.length + 1 : 0) + w.length > max) break;
+    out = out ? `${out} ${w}` : w;
+  }
+  return out || s.slice(0, max - 1) + "…"; // one very long word
+}
+
+/**
+ * Everything the 3D city needs, ready to draw: one skyscraper per account, already sorted and labeled.
+ * Each building: { key, label, name, domain, state: "breached" | "service" | "clear", height: 1-5, logo, signInWithGoogle }.
+ * height grows with account age (years since the first sign-up email); unknown age = 2.
+ * logo is a path on the checker server (prefix your API base) for services with a breach on record, else null: draw initials.
+ * Above `max` buildings, the calmest ones fold into one "district": { count, service } (service = amber ones in it).
+ */
+export function cityLayout(check, { max = 48, now = Date.now() } = {}) {
+  const rank = { breached: 2, service: 1, clear: 0 };
+  const all = (check.accounts ?? []).map((a) => {
+    const state = a.breached ? "breached" : a.serviceBreaches?.length ? "service" : "clear";
+    const age = a.firstSeen ? (now - Date.parse(a.firstSeen)) / (365.25 * 864e5) : null;
+    const logoBreach = a.serviceBreaches?.[0]?.name ?? (a.breached ? a.breaches[0] : null);
+    return {
+      key: a.domain,
+      label: shortName(a.name),
+      name: a.name,
+      domain: a.domain,
+      state,
+      height: age === null ? 2 : Math.min(5, 1 + Math.floor(age / 3)), // 0-2y: 1 ... 12y+: 5
+      logo: logoBreach ? `/api/logo?breach=${encodeURIComponent(logoBreach)}` : null,
+      signInWithGoogle: Boolean(a.signInWithGoogle),
+    };
+  }).sort((x, y) => rank[y.state] - rank[x.state] || y.height - x.height || x.label.localeCompare(y.label));
+  if (all.length <= max) return { buildings: all, district: null };
+  const rest = all.slice(max - 1); // keep a plot free for the district itself
+  return { buildings: all.slice(0, max - 1), district: { count: rest.length, service: rest.filter((b) => b.state === "service").length } };
+}
+
 const SENSITIVE = /password|phone|date of birth|dates of birth|physical address|social security|government|credit card|bank|security question/i;
 const yearsAgo = (date, now) => (now - Date.parse(date)) / (365.25 * 864e5);
 

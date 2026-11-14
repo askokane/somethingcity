@@ -74,6 +74,24 @@ assert.ok(s.breachedWhileMember.some((w) => w.name === "Adobe" && w.date.startsW
 assert.equal(s.exposedData.find((d) => d.type === "Passwords").breaches, 1);
 assert.equal(s.signInWithGoogle, 7);
 assert.ok(s.dormant > 0 && s.industries.length > 0 && s.largestBreach.records > 1e8 && s.footprintByYear.length > 5);
+// Building signs and the ready-to-draw city
+const { shortName, cityLayout } = await import("./checker.js");
+assert.equal(shortName("The Higgsfield Team"), "Higgsfield");
+assert.equal(shortName("Microsoft  Careers"), "Microsoft");
+assert.equal(shortName("♟Chess.com"), "Chess.com");
+assert.equal(shortName("Penn State Undergraduate Admissions"), "Penn State");
+assert.equal(shortName("Supercalifragilisticexpialidocious"), "Supercalifrag…");
+const layout = cityLayout(city, { now: Date.parse("2026-11-14") });
+assert.equal(layout.buildings.length, 20);
+assert.equal(layout.district, null);
+assert.deepEqual(layout.buildings.slice(0, 2).map((b) => b.state), ["breached", "breached"]); // red first
+assert.equal(layout.buildings.find((b) => b.domain === "amazon.com").height, 5); // since 2011
+assert.equal(layout.buildings.find((b) => b.domain === "adobe.com").logo, "/api/logo?breach=Adobe");
+assert.equal(layout.buildings.find((b) => b.domain === "github.com").logo, null); // no breach on record: initials
+const crowded = cityLayout(city, { max: 10 });
+assert.equal(crowded.buildings.length + crowded.district.count, 20);
+assert.ok(crowded.buildings.filter((b) => b.state !== "clear").length === 9 && crowded.district.count === 11); // calm ones fold first
+
 const empty = summarize(await checkAccount("unknown@demo.test"));
 assert.deepEqual([empty.accounts, empty.exposureScore, empty.fixFirst.length, empty.oldestLeak], [0, 0, 0, null]);
 
@@ -167,6 +185,9 @@ if (process.env.LIVE || process.argv.includes("--live")) {
   assert.ok(nw.biggest.every((b) => b.domain)); // named services, no anonymous combo lists
   assert.ok(!/<[a-z]/i.test(nw.recent[0].description ?? "")); // HTML stripped
   console.log(`news (${nw.source}): latest ${nw.recent[0].name} ${nw.recent[0].addedDate}, biggest ${nw.biggest[0].name}`);
+  const lg = await fetch(`${base}/api/logo?breach=Adobe`);
+  assert.ok(lg.ok && lg.headers.get("content-type").startsWith("image/") && (await lg.arrayBuffer()).byteLength > 100);
+  assert.equal((await fetch(`${base}/api/logo?breach=NoSuchBreach`)).status, 404);
 }
 
 const printed = [];

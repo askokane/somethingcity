@@ -3,7 +3,7 @@
 import http from "node:http";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { accountId, lookupDomains, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
-import { checkXon, scanInbox } from "./sources.js";
+import { checkXon, getCatalog, scanInbox } from "./sources.js";
 import { news, personalTimeline, serviceBreaches, timeline } from "./db.js";
 
 const PORT = Number(process.env.PORT) || 8787;
@@ -197,6 +197,25 @@ Return JSON: "summary" (2-3 sentences: what happened and what it means for them)
   }
 }
 
+// --- Service logos for building signs ---
+// Proxied so the browser never asks xposedornot.com for "the logos of this user's accounts" (that list is personal).
+// Only catalog logo URLs on xposedornot.com are fetched, looked up by breach id, so this can't fetch arbitrary URLs.
+const logoCache = new Map(); // breach id -> { type, body }; ponytail: ~800 logos max at ~2 KB each
+async function logo(req, res) {
+  const id = new URL(req.url, "http://localhost").searchParams.get("breach");
+  let hit = logoCache.get(id);
+  if (!hit) {
+    const url = (await getCatalog().catch(() => [])).find((b) => b.breachID === id)?.logo;
+    if (!url || new URL(url).host !== "xposedornot.com") return res.writeHead(404).end();
+    const r = await fetch(url, { signal: AbortSignal.timeout(8000) }).catch(() => null);
+    const type = r?.headers.get("content-type") ?? "";
+    if (!r?.ok || !type.startsWith("image/")) return res.writeHead(404).end();
+    hit = { type, body: Buffer.from(await r.arrayBuffer()) };
+    logoCache.set(id, hit);
+  }
+  res.writeHead(200, { "content-type": hit.type, "cache-control": "public, max-age=86400" }).end(hit.body);
+}
+
 // --- Live check for the signed-in email ---
 
 async function check(req, body) {
@@ -228,6 +247,7 @@ export const server = http.createServer(async (req, res) => {
       const rows = await timeline().catch(() => null);
       return rows ? json(res, 200, rows) : json(res, 503, { error: "Timeline unavailable." });
     }
+    if (req.method === "GET" && path === "/api/logo") return await logo(req, res);
     if (req.method === "GET" && path === "/api/news") {
       const limit = new URL(req.url, "http://localhost").searchParams.get("limit");
       const n = await news(limit ?? 10).catch(() => null);

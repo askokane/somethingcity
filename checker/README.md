@@ -46,6 +46,31 @@ The overall `status: "unknown"` (check unavailable) still applies to the whole r
 
 `accounts` comes from the inbox scan only if the user signed in with Google and allowed Gmail access. Otherwise it lists only the breached services.
 
+## Drawing the city: `cityLayout(result)`
+
+The city is the user's accounts: **one skyscraper per linked website**, with its name on the sign. The 8 Gotham landmarks are special buildings among them that hold the HUD panels (next section). `cityLayout` returns the skyscrapers ready to draw:
+
+```js
+import { checkAccount, cityLayout } from "./checker/checker.js";
+const { buildings, district } = cityLayout(await checkAccount("city@demo.test"), { max: 48 });
+// buildings: sorted red, then amber, then calm; within each, taller (older) first
+// [{ key: "linkedin.com", label: "LinkedIn", name: "LinkedIn", domain: "linkedin.com",
+//    state: "breached", height: 5, logo: "/api/logo?breach=LinkedInScrape-2021", signInWithGoogle: false }, ...]
+// district: null, or { count: 89, service: 3 } = one "+89 more" building for the overflow
+```
+
+| Field | Use it for |
+|---|---|
+| `key` | Stable building id (the domain) |
+| `label` | The sign. At most 14 characters, cut at a word boundary ("Penn State Undergraduate Admissions" → "Penn State"); `name` has the full name for the detail panel |
+| `state` | `breached` = red (your data leaked), `service` = amber (service breached), `clear` = calm |
+| `height` | 1–5 floors-tier by account age: 0–2 years → 1, 12+ years → 5, unknown → 2 |
+| `logo` | `${API}${logo}` for services with a breach on record, otherwise `null`: draw initials |
+| `signInWithGoogle` | Optional badge: no separate password to leak |
+
+- **Big inboxes:** above `max` buildings (default 48, which fits the prototype's cap), the calmest accounts fold into one **district** building. Red and amber buildings always stay in the skyline.
+- **Logos come through our server** (`GET /api/logo?breach=…`), not straight from xposedornot.com. Otherwise the browser would hand that site the list of this user's breached services. The proxy only fetches catalog logos from xposedornot.com, and caches them.
+
 ## Dashboard stats and news
 
 **`summarize(check)`** (in `checker.js`) turns any `AccountCheck`, live or demo, into every dashboard number. It works offline.
