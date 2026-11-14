@@ -158,6 +158,16 @@ assert.equal((await fetch(`${base}/api/check`, { method: "POST", body: "{}" })).
 const g = await fetch(`${base}/auth/google`, { redirect: "manual" });
 if (!process.env.GOOGLE_CLIENT_ID) assert.equal(g.status, 503); // not configured
 else assert.ok(g.status === 302 && g.headers.get("location").startsWith("https://accounts.google.com/"));
+// Failed Google callbacks say why (no cookie = started on the wrong address or another browser)
+const cbLogs = [];
+const cbLog = console.log;
+console.log = (...a) => cbLogs.push(a.join(" "));
+const cb = await fetch(`${base}/auth/google/callback?state=abc&code=xyz`, { redirect: "manual" });
+const cancelled = await fetch(`${base}/auth/google/callback?error=access_denied`, { redirect: "manual" });
+console.log = cbLog;
+assert.match(cb.headers.get("location"), /signin=failed&reason=state$/);
+assert.match(cancelled.headers.get("location"), /reason=cancelled$/);
+assert.ok(cbLogs.some((l) => /cookie missing.*not 127\.0\.0\.1/.test(l)));
 assert.equal((await post("/api/explain", { name: "Adobe" })).status, 404); // removed: advice comes from nextSteps()
 assert.equal((await post("/api/timeline/mine", { domains: ["not a domain!"] })).status, 400);
 const tl = await fetch(`${base}/api/timeline`);

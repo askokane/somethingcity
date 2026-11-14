@@ -126,11 +126,24 @@ function googleStart(res) {
 
 async function googleCallback(req, res) {
   const back = (result, headers = {}) => res.writeHead(302, { location: `${FRONTEND_URL}/?signin=${result}`, ...headers });
+  // Failures say why, in the log and as a short ?reason= code for the page (no personal data in either).
+  const fail = (reason, why) => {
+    console.log(`google sign-in failed (${reason}): ${why}`);
+    return res.writeHead(302, { location: `${FRONTEND_URL}/?signin=failed&reason=${reason}` }).end();
+  };
   const params = new URL(req.url, "http://localhost").searchParams;
+  if (params.get("error")) return fail("cancelled", `Google returned "${params.get("error")}" (cancelled, or not a test user)`);
   const state = params.get("state");
-  const valid = state && state === readCookie(req, "bc_oauth") && oauthStates.get(state) > Date.now();
+  const cookieState = readCookie(req, "bc_oauth");
+  const known = oauthStates.get(state) > Date.now();
   oauthStates.delete(state);
-  if (!valid || !params.get("code")) return back("failed").end();
+  if (!state || !params.get("code")) return fail("state", "Google's reply had no state or code");
+  if (state !== cookieState) {
+    return fail("state", cookieState
+      ? "sign-in started in another tab or browser; try again"
+      : `sign-in cookie missing: start from ${PUBLIC_URL || `http://localhost:${PORT}`} (not 127.0.0.1), same browser, cookies allowed`);
+  }
+  if (!known) return fail("state", "sign-in expired or the server restarted mid-sign-in; try again");
 
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -143,13 +156,16 @@ async function googleCallback(req, res) {
     }),
     signal: AbortSignal.timeout(10000),
   }).catch(() => null);
-  const tokens = tokenRes?.ok ? await tokenRes.json() : null;
-  if (!tokens?.id_token) return back("failed").end();
+  if (!tokenRes) return fail("token", "couldn't reach Google's token endpoint");
+  const tokens = await tokenRes.json().catch(() => ({}));
+  // Google's error code (e.g. invalid_client = wrong GOOGLE_CLIENT_SECRET, redirect_uri_mismatch) is safe to log
+  if (!tokenRes.ok || !tokens.id_token) return fail("token", `Google token exchange ${tokenRes.status} ${tokens.error ?? ""}: check GOOGLE_CLIENT_ID/SECRET in .env (no spaces or quotes)`);
 
   // Straight from Google's token endpoint over TLS, so the signature check can be skipped (OIDC Core 3.1.3.7).
   const claims = JSON.parse(Buffer.from(tokens.id_token.split(".")[1], "base64url").toString());
   const email = normalizeEmail(claims.email);
-  if (claims.aud !== process.env.GOOGLE_CLIENT_ID || !claims.email_verified || !email) return back("failed").end();
+  if (claims.aud !== process.env.GOOGLE_CLIENT_ID) return fail("token", "token was issued for a different client ID");
+  if (!claims.email_verified || !email) return fail("account", "this Google account has no verified email");
 
   // The user can untick Gmail access on the consent screen; then we only have the verified email.
   let inbox = null;
@@ -171,11 +187,19 @@ const DEV_PAGE = `<!doctype html><meta charset="utf-8"><title>Breach City checke
 <script type="module">
 const post = (p) => fetch(p, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
 document.getElementById("logout").onclick = async (e) => { e.preventDefault(); await post("/api/logout"); location.href = "/dev"; };
+const q = new URLSearchParams(location.search);
+const hints = {
+  state: "Start sign-in from this page at http://localhost:8787/dev (not 127.0.0.1), in one tab, and don't restart the server mid-way.",
+  cancelled: "Google sign-in was cancelled, or this Google account isn't a test user in Google Cloud.",
+  token: "Google rejected the app's credentials: check GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in checker/.env.",
+  account: "This Google account has no verified email.",
+};
+const failed = q.get("signin") === "failed" ? \`Sign-in failed: \${hints[q.get("reason")] ?? "see the server console for the reason."}\\n\\n\` : "";
 const r = await post("/api/check").then((x) => x.json());
-document.getElementById("out").textContent = r.status
+document.getElementById("out").textContent = failed + (r.status
   ? \`\${r.label}: \${r.status} (\${r.source})\${r.error ? " - " + r.error : ""}\\n\${r.accounts.length} linked accounts, \${r.accounts.filter((a) => a.breached).length} with your data breached, \${r.accounts.filter((a) => !a.breached && a.serviceBreaches?.length).length} more on breached services\\n\\n\` +
     r.accounts.map((a) => \`\${a.breached ? "BREACHED" : a.serviceBreaches?.length ? "SERVICE " : "ok      "}  \${a.name.slice(0, 28).padEnd(28)} \${a.domain.padEnd(26)} \${a.foundIn.join("+").padEnd(13)} \${(a.firstSeen ?? "").padEnd(11)} \${(a.serviceBreaches ?? []).map((b) => b.name + " " + b.date.slice(0, 4)).join(", ")}\`).join("\\n")
-  : (r.error ?? "Not signed in.");
+  : (r.error ?? "Not signed in."));
 </script>`;
 
 // --- Service logos for building signs ---
