@@ -1,0 +1,20 @@
+{
+  "amber": {
+    "account": "Adobe",
+    "steps": [
+      "Your email wasn't found in this leak, but if you had an Adobe account back then, change that password to be safe.",
+      "Turn on two-step verification (2FA) for Adobe.",
+      "Use a password manager so every site gets its own unique password.",
+      "Expect phishing emails that mention Adobe; sign in by typing the address, not by clicking links."
+    ]
+  },
+  "red": {
+    "account": "MyFitnessPal",
+    "steps": [
+      "Change your MyFitnessPal password, and the password on any other site where you reused it.",
+      "Turn on two-step verification (2FA) for MyFitnessPal.",
+      "Use a password manager so every site gets its own unique password.",
+      "Expect phishing emails that mention MyFitnessPal; sign in by typing the address, not by clicking links."
+    ]
+  }
+}

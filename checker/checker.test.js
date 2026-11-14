@@ -158,14 +158,18 @@ assert.equal((await fetch(`${base}/api/check`, { method: "POST", body: "{}" })).
 const g = await fetch(`${base}/auth/google`, { redirect: "manual" });
 if (!process.env.GOOGLE_CLIENT_ID) assert.equal(g.status, 503); // not configured
 else assert.ok(g.status === 302 && g.headers.get("location").startsWith("https://accounts.google.com/"));
-assert.equal((await post("/api/explain", { name: "x".repeat(500) })).status, 400); // validated
-const ex = await post("/api/explain", { name: "Adobe", date: "2013-10-01", exposedData: ["Passwords"], mine: true });
-if (!process.env.GEMINI_API_KEY) assert.equal(ex.status, 503); // frontend falls back to nextSteps()
-else {
-  const e = await ex.json();
-  assert.ok(ex.status === 200 && e.summary && e.steps.length, `gemini: ${ex.status} ${JSON.stringify(e)}`);
-  console.log(`gemini: ${e.summary.slice(0, 80)}…`);
-}
+// Failed Google callbacks say why (no cookie = started on the wrong address or another browser)
+const cbLogs = [];
+const cbWarn = console.warn;
+console.warn = (...a) => cbLogs.push(a.join(" "));
+const cb = await fetch(`${base}/auth/google/callback?state=abc&code=xyz`, { redirect: "manual" });
+const cancelled = await fetch(`${base}/auth/google/callback?error=access_denied`, { redirect: "manual" });
+console.warn = cbWarn;
+assert.match(cb.headers.get("location"), /signin=failed&reason=state$/);
+assert.match(cancelled.headers.get("location"), /reason=cancelled$/);
+assert.match(cb.headers.get("set-cookie"), /bc_oauth=;.*Max-Age=0/); // used sign-in cookie cleared
+assert.ok(cbLogs.some((l) => /^\[oauth\].*cookie missing.*not 127\.0\.0\.1/.test(l)));
+assert.equal((await post("/api/explain", { name: "Adobe" })).status, 404); // removed: advice comes from nextSteps()
 assert.equal((await post("/api/timeline/mine", { domains: ["not a domain!"] })).status, 400);
 const tl = await fetch(`${base}/api/timeline`);
 if (!process.env.DATABASE_URL) assert.equal(tl.status, 503); // not configured
@@ -230,5 +234,14 @@ if (process.env.LIVE || process.argv.includes("--live")) {
 
 assert.equal((await post("/api/logout", {}, { cookie: session })).status, 200);
 assert.equal((await post("/api/check", {}, { cookie: session })).status, 401);
+
+// Per-IP rate limit: at most 10 code requests an hour (different emails, so the per-email minute rule doesn't apply).
+// Runs last because it uses up this IP's budget.
+const quiet = console.log;
+console.log = () => {};
+const codeStatuses = [];
+for (let i = 0; i < 11; i++) codeStatuses.push((await post("/api/verify/start", { email: `ratelimit${i}@example.com` })).status);
+console.log = quiet;
+assert.equal(codeStatuses.at(-1), 429);
 server.close();
 console.log("checker ok");

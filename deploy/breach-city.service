@@ -1,0 +1,21 @@
+# systemd service for the checker. Install: see DEPLOY.md
+[Unit]
+Description=Breach City checker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=breachcity
+WorkingDirectory=/srv/breach-city/checker
+# Secrets live outside the served folder, readable by root only (systemd loads them before dropping to User)
+EnvironmentFile=/etc/breach-city.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+# Hardening: the checker only needs the network; it writes nothing to disk
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

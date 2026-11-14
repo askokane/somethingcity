@@ -7,15 +7,15 @@ The backend for Breach City (Justin's workstream). It turns an email the user **
 2. `cityLayout(result)` gives the skyscrapers, ready to draw.
 3. `summarize(result)` gives every number for the landmarks.
 4. `GET /api/news` and `POST /api/timeline/mine` feed the Cobblepot Manor news panel.
-5. When a skyscraper is clicked, show its breaches plus `POST /api/explain` (or `nextSteps()` offline).
+5. When a skyscraper is clicked, show its breaches plus advice from `nextSteps()`.
 
 Import everything from `checker/checker.js`. It's a plain ES module: no build step, and it works in the browser. The server runs at `http://localhost:8787`.
 
 **Build without running anything:**
-- **[samples/](samples/)** has real output of every call: `check-city.json`, `city-layout.json` (also `-crowded`, with a district), `summary.json`, `news.json`, `timeline-mine.json`, `explain-fallback.json` and `check-unknown.json`. Regenerate them with `npm run samples`.
+- **[samples/](samples/)** has real output of every call: `check-city.json`, `city-layout.json` (also `-crowded`, with a district), `summary.json`, `news.json`, `timeline-mine.json`, `next-steps.json` and `check-unknown.json`. Regenerate them with `npm run samples`.
 - **[checker.d.ts](checker.d.ts)** gives every function and shape types, so editors autocomplete `building.state`, `stats.fixFirst` and so on, even in plain JavaScript.
 
-> **Heads up:** the untracked prototype in `web/` (from another chat) predates most of this. It has no amber state, no `cityLayout`, no stats, news or explanations, so treat it as a reference for wiring sign-in, not as the current contract.
+> **Heads up:** the untracked prototype in `web/` (from another chat) predates most of this. It has no amber state, no `cityLayout`, no stats, news or `nextSteps()` advice, so treat it as a reference for wiring sign-in, not as the current contract.
 
 ---
 
@@ -36,8 +36,6 @@ It runs with an empty `.env`; features switch on as keys are added (get the shar
 | Email codes | optional `RESEND_API_KEY` | code prints in the server console |
 | Google sign-in + Gmail inbox scan | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | `/auth/google` returns 503 |
 | Timeline, news, service breaches (Tiger Data) | `DATABASE_URL` | news and service breaches fall back to the in-memory catalog; timelines return 503 |
-| Gemini explanations | `GEMINI_API_KEY` | `/api/explain` returns 503 → use `nextSteps()` |
-
 Open the frontend at **`http://localhost:<port>`**, not `127.0.0.1`, or the session cookie won't be sent. Set `FRONTEND_URL` in `checker/.env` to the frontend's address so Google sign-in returns there.
 
 ---
@@ -68,12 +66,11 @@ const stats = summarize(result);
 const news = await fetch(`${API}/api/news?limit=10`).then((r) => (r.ok ? r.json() : null));
 const timeline = await post("/api/timeline/mine", { domains: result.accounts.map((a) => a.domain) }).then((r) => (r.ok ? r.json() : null));
 
-// 5. On skyscraper click: the account, its breaches, and advice
-async function advice(account) {
-  const b = account.serviceBreaches[0];          // or the user's own breach, see section 3
-  if (!b) return null;
-  const r = await post("/api/explain", { name: b.name, date: b.date, exposedData: b.exposedData, mine: account.breached });
-  return r.ok ? await r.json() : { summary: null, steps: nextSteps(account.name, b.exposedData, account.breached) };
+// 5. On skyscraper click: the account, its breaches, and advice (works offline)
+function advice(account) {
+  const mine = result.breaches.find((b) => b.domain === account.domain);   // red: the user's own breach
+  const b = mine ?? account.serviceBreaches[0];                             // amber: the service's breach
+  return b ? nextSteps(account.name, b.exposedData, Boolean(mine)) : [];
 }
 ```
 
@@ -106,7 +103,7 @@ async function advice(account) {
 - `name`, `domain`, `firstSeen` (first sign-up email) and `foundIn` (`"inbox"` and/or `"breach"`).
 - **Red:** `account.breaches` (names) and `result.breaches.filter((b) => b.domain === account.domain)` (dates and data types).
 - **Amber:** `account.serviceBreaches`: `name`, `date`, `exposedData`, `records`, `industry`. Say "your email wasn't found in this leak".
-- **Advice:** `POST /api/explain`, falling back to `nextSteps()` (snippet above).
+- **Advice:** `nextSteps(service, exposedData, mine)` returns 3–6 calm, specific steps based on what leaked (snippet above; example in `samples/next-steps.json`).
 
 ### The 8 landmarks (HUD panels): `summarize(result)` and the news endpoints
 
@@ -186,7 +183,6 @@ Every Google account must be on the app's test-user list (see Google setup below
 | `GET /auth/google` | | redirect to Google | then back to `FRONTEND_URL/?signin=…` |
 | `POST /api/check` | `{ email }` or `{}` | `AccountCheck` | only for the session's own email; 401 `"Verify this email first."` otherwise |
 | `POST /api/logout` | `{}` | `{ ok }` | |
-| `POST /api/explain` | `{ name, date, exposedData, mine }` | `{ summary, steps, source }` | 503 without Gemini → `nextSteps()` |
 | `GET /api/news` | `?limit=1..50` | `{ recent, biggest, thisYear, source }` | Tiger Data, falls back to the catalog |
 | `GET /api/timeline` | | `[{ year, breaches, records }]` | Tiger Data only |
 | `POST /api/timeline/mine` | `{ domains: [...] }` (≤ 500) | `[{ year, breaches, records, yours }]` | Tiger Data only |
@@ -288,12 +284,6 @@ Without `RESEND_API_KEY`, codes print in the server console, which is fine for t
 
 Only the public breach catalog goes in the database. No emails, sessions or check results are stored.
 
-## Gemini (breach explanations)
-
-1. Get a free API key at [Google AI Studio](https://aistudio.google.com/) and set `GEMINI_API_KEY`. `GEMINI_MODEL` defaults to `gemini-2.5-flash`.
-2. `POST /api/explain` returns `{ summary, steps, source: "Gemini" }`. Results are cached per breach.
-3. Gemini only ever receives **public breach metadata**: the service name, breach date, data types, and whether this user's email was in it. Never an email, account list or inbox content.
-
 ## Privacy: what goes where
 
 - **Ownership first.** A live lookup only runs for the email in your session, proven either by a 6-digit code or by Google sign-in. You can't look up someone else's email.
@@ -338,7 +328,7 @@ Tested on a real, years-old inbox: **137 accounts** found.
 |---|---|
 | `checker.js` | Browser + Node module: `checkAccount`, `checkSignedIn`, `cityLayout`, `summarize`, `nextSteps`, `shortName`, fixtures |
 | `demo-city.js` | The `city@demo.test` data, generated from the real breach catalog |
-| `server.js` | HTTP server: verification, Google sign-in, checks, explain, news, timelines, logos, `/dev` |
+| `server.js` | HTTP server: verification, Google sign-in, checks, news, timelines, logos, `/dev` |
 | `sources.js` | XposedOrNot lookups and the Gmail inbox scan |
 | `db.js` | Tiger Data: catalog loader, news, timelines, service-breach join |
 | `checker.d.ts` | Types for everything above |
@@ -349,5 +339,5 @@ Tested on a real, years-old inbox: **137 accounts** found.
 
 ```bash
 npm test           # offline: fixtures, layout, stats, inbox parsing, verification, sessions
-npm run test:live  # also XposedOrNot, Tiger Data, news, logos, Gemini, if .env has them
+npm run test:live  # also XposedOrNot, Tiger Data, news and logos, if .env has them
 ```

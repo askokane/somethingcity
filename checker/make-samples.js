@@ -21,7 +21,10 @@ save("city-layout-crowded.json", cityLayout(city, { max: 12, now: NOW }));
 save("summary.json", summarize(city, NOW));
 
 const adobe = city.accounts.find((a) => a.domain === "adobe.com");
-save("explain-fallback.json", { summary: null, steps: nextSteps(adobe.name, adobe.serviceBreaches[0].exposedData, adobe.breached) });
+save("next-steps.json", {
+  amber: { account: adobe.name, steps: nextSteps(adobe.name, adobe.serviceBreaches[0].exposedData, false) },
+  red: { account: "MyFitnessPal", steps: nextSteps("MyFitnessPal", city.breaches.find((b) => b.domain === "myfitnesspal.com").exposedData, true) },
+});
 
 try {
   save("news.json", await news(5));

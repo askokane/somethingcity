@@ -29,11 +29,19 @@ The checker listens on port 8787. Configure optional credentials in the gitignor
 - Drag to pan and scroll to zoom. Use **Reset view** to return to the city overview.
 - Select a directory entry or a building to open its account report and focus the camera.
 - Open the account directory, inbox scan, or breach timeline from the navigation.
-- Use **Check** to verify an email address. The demo addresses `breached@demo.test`, `clear@demo.test`, and `unknown@demo.test` use offline fixtures.
+- Use **Check** to verify an email address. The demo addresses `city@demo.test`, `breached@demo.test`, `clear@demo.test`, and `unknown@demo.test` use offline fixtures. **`city@demo.test` is the judged demo:** 20 real services with real breach history, fully offline.
 - Use **Google sign in** to verify ownership and optionally scan Gmail headers when OAuth is configured.
 - Select **Reset** to restore the sample accounts.
 
 The dashboard does not collect passwords. A clear result means that the selected source returned no known match.
+
+## Checker helpers for the frontend
+
+`checker/checker.js` also turns any result into ready-to-draw data: `cityLayout(result)` gives one skyscraper per linked website (label, red/amber/calm state, height, logo), and `summarize(result)` gives the landmark stats (exposure score, fix-first list, what leaked). The checker adds `GET /api/news` (recent and biggest breaches) and `POST /api/timeline/mine`. Real example responses are in [checker/samples/](checker/samples/), and types in [checker/checker.d.ts](checker/checker.d.ts); the full guide and screen map are in [checker/README.md](checker/README.md).
+
+## Deploy on a real domain
+
+[deploy/DEPLOY.md](deploy/DEPLOY.md) puts the frontend and checker on one Vultr server with HTTPS (Caddy), in about 15 copy-paste commands. On one domain, the frontend calls the checker at the same origin, so `CHECKER_API` becomes `""`.
 
 ## Blender city and account buildings
 
