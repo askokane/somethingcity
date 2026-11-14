@@ -17,11 +17,21 @@ const accounts = [
   { id: 'bc-006', name: 'Narrows Cloud', label: 'l***@narrows.test', district: 'The Narrows', status: 'unknown', slot: 5, checkedAt: '10:42 AM', source: 'Demo fixture', breaches: [], error: 'The sample check is unavailable.' },
 ];
 
-const slots = [
+const blocks = [
   { x: -12, z: -12, district: 'Northpoint' }, { x: 0, z: -12, district: 'Old Gotham' }, { x: 12, z: -12, district: 'Crown Point' },
   { x: -12, z: 0, district: 'The Foundry' }, { x: 0, z: 0, district: 'Civic Center' }, { x: 12, z: 0, district: 'The Narrows' },
   { x: -12, z: 12, district: 'Harbor Ward' }, { x: 0, z: 12, district: 'Market Square' }, { x: 12, z: 12, district: 'East Channel' },
 ];
+// Landmarks are fixed: the same building on the same block for every email. Only website skyscrapers change.
+// Wayne Tower is the tallest, so it takes the back corner on the camera's diagonal, where it hides nothing behind it
+// (in the center it hid a whole block of accounts). 'park' keeps the trees block free (no model).
+const landmarkBlocks = { 0: 'wayne', 2: 'ace', 7: 'arkham', 8: 'park' };
+const landmarkScale = { wayne: 2, ace: 0.44, arkham: 0.54 };
+// Every other block holds a 2x2 grid of account plots: 5 blocks give 20 website skyscrapers.
+// Accounts beyond that stay in the directory as "Beyond city plots"; the checker sorts red ones first, so they always get a building.
+const PLOT_OFFSETS = [[-1.35, -1.35], [1.35, -1.35], [-1.35, 1.35], [1.35, 1.35]];
+const ACCOUNT_FOOTPRINT = 2.2; // skyscraper width on its plot, in meters
+const slots = blocks.flatMap((block, index) => (index in landmarkBlocks ? [] : PLOT_OFFSETS.map(([dx, dz]) => ({ x: block.x + dx, z: block.z + dz, district: block.district }))));
 const statusText = { clear: 'No known match in this source', breached: 'Known breach match', unknown: 'Check unavailable' };
 const statusColors = { clear: 0x83bc9b, breached: 0xe58268, unknown: 0xd2b56b };
 const sceneHost = document.querySelector('#city-scene');
@@ -32,7 +42,7 @@ accounts.forEach((account) => slotOccupants.set(account.slot, account.id));
 let selectedId = accounts[0].id;
 let nextId = 7;
 let toastTimer;
-const landmarkSlots = new Set([7]);
+const landmarkSlots = new Set(); // landmarks have their own blocks now, so no account plot is reserved
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#182129');
@@ -140,8 +150,12 @@ async function addCityProps(environment) {
   };
   const crossings = [];
   const signals = [];
+  // Streets are 3 m wide, so each intersection box spans ±1.5 m. At 0.9 scale a crosswalk is ~2.6 m across and ~2.3 m deep;
+  // centering it 2.65 m out puts it across the street just outside the box (1.55 m out made all four overlap into a "#").
+  const CROSSWALK_SCALE = 0.9;
+  const CROSSWALK_OFFSET = 2.65;
   for (const x of [-6, 6]) for (const z of [-6, 6]) {
-    for (const side of [-1, 1]) crossings.push([x, z + side * 1.55, 0.72, 0], [x + side * 1.55, z, 0.72, Math.PI / 2]);
+    for (const side of [-1, 1]) crossings.push([x, z + side * CROSSWALK_OFFSET, CROSSWALK_SCALE, 0], [x + side * CROSSWALK_OFFSET, z, CROSSWALK_SCALE, Math.PI / 2]);
     signals.push([x - 2.15, z - 2.15, 0.62, 0], [x + 2.15, z + 2.15, 0.62, Math.PI]);
   }
   placeMany('gotham_crosswalk', crossings, 0.06);
@@ -196,7 +210,9 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
     const model = chooseBuildingModel(account, models);
     addAccountBuilding(account, model, buildingScale(model, models));
   });
-  if (models.arkham) addPlacedModel(models.arkham, [0, 0.23, 12], 0.54, 0);
+  for (const [index, name] of Object.entries(landmarkBlocks)) {
+    if (models[name]) addPlacedModel(models[name], [blocks[index].x, 0.23, blocks[index].z], landmarkScale[name], 0);
+  }
   accountModelsReady = true;
   finishInitialLoad();
 }, undefined, (error) => {
@@ -207,17 +223,18 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
 });
 
 function chooseBuildingModel(account, models) {
-  // The account ID is stable for a login, so its Blender building style stays consistent.
-  const styles = [models.generic, models.wayne, models.ace].filter(Boolean);
-  if (!styles.length) return null;
-  let hash = 2166136261;
-  for (const character of account.id) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
-  return styles[(hash >>> 0) % styles.length];
+  // Every website is a Gotham skyscraper; Wayne Tower, Ace Chemicals and Arkham are fixed landmarks, never accounts.
+  return models.generic ?? null;
 }
 
-function buildingScale(model, models) {
-  // Preserve the factory's smaller footprint while doubling its original in-map scale.
-  return model === models.ace ? 0.44 : 2;
+let accountScale = null;
+function buildingScale(model) {
+  // Fit the skyscraper's footprint to one 2x2 plot, whatever scale the Blender export uses.
+  if (accountScale === null) {
+    const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
+    accountScale = ACCOUNT_FOOTPRINT / Math.max(size.x, size.z);
+  }
+  return accountScale;
 }
 
 function addAccountBuilding(account, source, scale = 2) {
