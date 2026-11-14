@@ -1,0 +1,10 @@
+{
+  "id": 1,
+  "name": "The Night Ledger",
+  "height_m": 9.78,
+  "tile_m": [
+    10.1,
+    9.2
+  ],
+  "style": "Gotham-inspired 8-bit"
+}

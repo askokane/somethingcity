@@ -1,31 +1,12 @@
 import * as THREE from 'three';
+import { createStylizedSea } from './stylized-sea.js';
+import { createCoastalScene } from './coastal-scene.js';
+import { isBeachEdge } from './coastal-plan.js';
+import { seededRandom } from './city-scatter.js';
 
-export const UNITS_PER_METER = 3 / 7;
-export const FLOOR = 3 * UNITS_PER_METER;
-export const GRID_SIZE = 4;
-export const BLOCK_SPACING = 12;
-export const blocks = Array.from({ length: GRID_SIZE ** 2 }, (_, i) => ({
-  x: (i % GRID_SIZE - 1.5) * BLOCK_SPACING,
-  z: (Math.floor(i / GRID_SIZE) - 1.5) * BLOCK_SPACING,
-  district: ['Northpoint', 'Old Gotham', 'Crown Point', 'The Foundry'][i % 4],
-}));
-export const landmarks = [
-  ['Wayne Tower', 'wayne_tower.glb', 0, 12],
-  ['Ace Chemicals', 'ace_chemicals_8bit.glb', 3, 6],
-  ['Arkham Asylum', 'arkham_asylum_8bit.glb', 1, 7],
-  ['Gotham Bank', 'gotham_bank.glb', 2, 6],
-  ['GCPD Headquarters', 'gcpd_hq.glb', 4, 5],
-  ['Cobblepot Manor', 'cobblepot_manor.glb', 7, 5],
-  ['Blackgate Penitentiary', 'blackgate_penitentiary.glb', 12, 4],
-  ['Elliot Memorial', 'elliot_memorial.glb', 15, 5],
-].map(([name, file, block, height]) => ({ name, file, block, height }));
-const reserved = new Set(landmarks.map(l => l.block));
-export const slots = blocks.flatMap((block, blockIndex) => reserved.has(blockIndex) ? [] :
-  [[-2.25, -2.25], [2.25, -2.25], [-2.25, 2.25], [2.25, 2.25]].map(([dx, dz]) => ({
-    x: block.x + dx, z: block.z + dz, district: block.district, block: blockIndex,
-  })));
-// Fill the downtown first; the outskirts remain residential when account counts are low.
-slots.sort((a, b) => Math.hypot(a.x, a.z) - Math.hypot(b.x, b.z));
+
+import { blocks, slots, islands, bridge, landCells, edges, FLOOR } from './city-plan.js';
+export * from './city-plan.js';
 
 export function createCity(scene) {
   const group = new THREE.Group();
@@ -39,47 +20,71 @@ export function createCity(scene) {
     mesh.position.set(x, y, z); mesh.scale.set(w, h, d);
     mesh.receiveShadow = true; mesh.castShadow = true; group.add(mesh); return mesh;
   }
-  cube(0, -0.9, 0, 1000, 0.4, 1000, '#233d49');
-  cube(0, -0.38, 0, 50, 0.8, 50, '#46515a');
-  cube(0, 0.03, 0, 48, 0.08, 48, '#252d35');
-  for (const b of blocks) cube(b.x, 0.12, b.z, 9, 0.22, 9, '#555c62');
-  for (const road of [-24, -12, 0, 12, 24]) {
-    for (let p = -23; p < 24; p += 3) {
-      cube(road, 0.085, p, 0.06, 0.015, 1.2, '#b1a383');
-      cube(p, 0.085, road, 1.2, 0.015, 0.06, '#b1a383');
+  const sea = createStylizedSea(islands);
+  group.add(sea.root);
+  const ready = createCoastalScene().then(coast => { group.add(coast); return coast; });
+  for (const c of landCells) {
+    cube(c.x, -0.89, c.z, 12, 1.82, 12, '#46515a');
+    cube(c.x, 0.03, c.z, 12, 0.08, 12, '#252d35');
+  }
+  for (const b of blocks) {
+    const color = b.format === 'garden' ? '#496455' : b.format === 'market' ? '#666258' : b.format === 'plaza' ? '#8a8475' : b.format === 'dockyard' ? '#64665d' : '#555c62';
+    cube(b.x, 0.12, b.z, b.width, 0.22, b.depth, color);
+    if (b.format === 'terrace' || b.format === 'courtyard') for (const side of [-1, 1]) {
+      const turned = b.format === 'terrace';
+      cube(b.x + (turned ? side * 4.2 : 0), .12, b.z + (turned ? 0 : side * 4.2), turned ? .65 : 8, .22, turned ? 8 : .65, '#555c62');
+    }
+    if (b.format === 'garden') {
+      cube(b.x, 0.245, b.z, b.width - 1, 0.05, 7.8, '#3f5a49');
+      cube(b.x, 0.28, b.z, b.width, 0.05, 1, '#9c9581');
+
+    }
+    if (b.format === 'courtyard') cube(b.x, .25, b.z, .6, .04, 7.5, '#9c9581');
+  }
+  for (const edge of edges) {
+    if (edge.shore && !isBeachEdge(edge)) {
+      cube(edge.x, -.15, edge.z, edge.vertical ? .25 : 12, .45, edge.vertical ? 12 : .25, '#778c91');
+      cube(edge.x, -.47, edge.z, edge.vertical ? .6 : 12, .025, edge.vertical ? 12 : .6, '#67969d');
+    } else if (!edge.shore) {
+      for (const offset of [-4.5, -1.5, 1.5, 4.5]) cube(edge.x + (edge.vertical ? 0 : offset), .085, edge.z + (edge.vertical ? offset : 0), edge.vertical ? .06 : 1.2, .015, edge.vertical ? 1.2 : .06, '#b1a383');
     }
   }
-  // Two bridge decks and their parapets connect the island to the water's edge.
-  for (const side of [-1, 1]) {
-    cube(side * 32, 0.04, 0, 16, 0.3, 3, '#3f4851');
-    for (const z of [-1.6, 1.6]) cube(side * 32, 0.55, z, 16, 0.7, 0.18, '#7c8386');
-    for (const x of [28, 36]) cube(side * x, -0.6, 0, 0.7, 2, 3, '#525b61');
-  }
-  // Repeated row houses share one draw call per material, rather than cloned GLBs.
-  const positions = [];
-  for (const b of blocks) for (const side of [-1, 1]) for (let i = -1; i <= 1; i++) {
-    positions.push([b.x + i * 2.3, b.z + side * 4.2]);
-  }
+  // Deliberately simple placeholder; replace this named group with the final bridge GLB.
+  const bridgeRoot = new THREE.Group(); bridgeRoot.name = 'Inter-island bridge placeholder'; group.add(bridgeRoot);
+  bridgeRoot.attach(cube(bridge.x, 0.04, bridge.z, bridge.length, 0.3, bridge.width, '#68727d'));
+  for (const side of [-1, 1]) bridgeRoot.attach(cube(bridge.x, 0.48, bridge.z + side * 1.6, bridge.length, 0.6, 0.18, '#c4b58d'));
+  for (let x = islands[0].maxX; x < islands[1].minX; x += 3) bridgeRoot.attach(cube(x + 1, 0.2, bridge.z, 1.2, 0.02, 0.06, '#d4c9aa'));
   const matrix = new THREE.Matrix4();
-  for (const [roof, color] of [[false, '#73747b'], [true, '#303b45']]) {
-    const mesh = new THREE.InstancedMesh(box, new THREE.MeshStandardMaterial({ color }), positions.length);
-    positions.forEach(([x, z], i) => {
-      const h = FLOOR * (1 + (i % 3) * 0.35);
-      matrix.compose(new THREE.Vector3(x, roof ? 0.23 + h : 0.23 + h / 2, z), new THREE.Quaternion(), new THREE.Vector3(1.8, roof ? 0.15 : h, 0.4));
-      mesh.setMatrixAt(i, matrix);
-    });
-    mesh.castShadow = true; mesh.receiveShadow = true; group.add(mesh);
+  // Batch static streets, slabs and bridge pieces by material as the map grows.
+  for (const material of materials.values()) {
+    const pieces = group.children.filter(child => child.isMesh && !child.isInstancedMesh && child.material === material);
+    if (!pieces.length) continue;
+    const batch = new THREE.InstancedMesh(box, material, pieces.length);
+    pieces.forEach((piece, i) => { piece.updateMatrix(); batch.setMatrixAt(i, piece.matrix); group.remove(piece); });
+    batch.receiveShadow = true; batch.castShadow = true; group.add(batch);
   }
-  const parks = slots.map(slot => {
-    const park = new THREE.Group(); group.add(park);
-    const lawn = cube(slot.x, 0.245, slot.z, 3.5, 0.05, 3.5, '#465e50'); park.attach(lawn);
-    for (const dx of [-0.9, 0.9]) {
-      park.attach(cube(slot.x + dx, 0.7, slot.z, 0.17, 0.9, 0.17, '#645342'));
-      park.attach(cube(slot.x + dx, 1.5, slot.z, 1.05, 1.2, 1.05, '#526e56'));
-    }
-    return park;
+  const parkParts = [
+    { color: '#465e50', offsets: [0], y: 0.245, size: [3.5, 0.05, 3.5] },
+  ].map(part => {
+    part.mesh = new THREE.InstancedMesh(box, new THREE.MeshStandardMaterial({ color: part.color }), slots.length * part.offsets.length);
+    part.mesh.castShadow = true; part.mesh.receiveShadow = true; group.add(part.mesh); return part;
   });
-  return { sync(occupants) { parks.forEach((park, i) => { park.visible = !occupants.has(i); }); }, group };
+  function sync(occupants) {
+    for (const part of parkParts) {
+      let index = 0;
+      slots.forEach((slot, i) => {
+        if (occupants.has(i)) return;
+        for (const dx of part.offsets) {
+          matrix.compose(new THREE.Vector3(slot.x + dx, part.y, slot.z), new THREE.Quaternion(), new THREE.Vector3(...part.size));
+          part.mesh.setMatrixAt(index++, matrix);
+        }
+      });
+      part.mesh.count = index; part.mesh.instanceMatrix.needsUpdate = true;
+      part.mesh.computeBoundingSphere();
+    }
+  }
+  sync(new Map());
+  return { sync, group, ready, update(time) { sea.update(time); } };
 }
 
 export function landmarkLabel(name) {

@@ -2,7 +2,7 @@
 
 **See your digital exposure as a city.** Breach City turns a verified account check into an interactive isometric Gotham city. Each linked service is represented in the dashboard, while Blender-built blocks, account towers, landmarks, and street details give the city its shape.
 
-Hackathon project for Emory Hacks. The plan and privacy rules are in [planning.md](planning.md).
+Hackathon project for Emory Hacks. The plan and privacy rules are in [planning.md](docs/planning.md).
 
 ## Run locally
 
@@ -57,9 +57,9 @@ Account building style is selected deterministically from the account ID, so the
 |---|---|---|
 | Checker service and browser helpers | Justin | `checker/` |
 | Account buildings and landmarks | Daniel | `models/buildings/` |
-| City environment and street props | Tai | `models/everything-else/`, `city-schematic-metrics.md` |
+| City environment and street props | Tai | `models/everything-else/`, `docs/city-schematic-metrics.md` |
 | Frontend and integration | Atharva | `app.js`, `index.html`, `styles.css`, `city-stats.css` |
 
-See [checker/README.md](checker/README.md) for the checker frontend guide and [integration-handoff.md](integration-handoff.md) for the current integration contract. The app uses Three.js 0.171.0 modules in `vendor/three/`; see `vendor/three/LICENSE`.
+See [checker/README.md](checker/README.md) for the checker frontend guide and [integration-handoff.md](docs/integration-handoff.md) for the current integration contract. The app uses Three.js 0.171.0 modules in `vendor/three/`; see `vendor/three/LICENSE`.
 
 This prototype is not affiliated with DC or Warner Bros.
