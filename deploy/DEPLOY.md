@@ -37,7 +37,7 @@ The repository must be public or otherwise cloneable by the server. For a privat
 
 ```bash
 useradd --system --no-create-home --shell /usr/sbin/nologin breachcity
-git clone https://github.com/askokane/somethingcity.git /srv/breach-city
+git clone --branch justin/atharva-map https://github.com/askokane/somethingcity.git /srv/breach-city
 cd /srv/breach-city/checker
 npm ci --omit=dev
 ```
@@ -131,7 +131,7 @@ SSH into the server and run:
 
 ```bash
 cd /srv/breach-city
-git pull --ff-only
+git pull --ff-only origin justin/atharva-map
 cd checker
 npm ci --omit=dev
 systemctl restart breach-city
