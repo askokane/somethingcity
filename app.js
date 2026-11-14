@@ -1304,7 +1304,7 @@ document.addEventListener('keydown', (event) => {
 
 function renderDetails() {
   const account = accountsById.get(selectedId);
-  if (!account) return;
+  if (!account) { renderDirectory(); return; } // e.g. a check that found no websites: still clear the list
   document.querySelector('#report-id').textContent = account.id.toUpperCase().replace('-', '—');
   document.querySelector('#detail-name').textContent = account.name;
   document.querySelector('#detail-label').textContent = account.label;
@@ -1471,7 +1471,9 @@ function installCheck(result) {
   if (!document.querySelector('#city-stats').hidden) closeCityStats();
   currentCheck = result;
   const stamp = result.checkedAt ? new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(new Date(result.checkedAt)) : null;
-  const entries = result.accounts.length ? result.accounts : [{ name: result.label, domain: '', breached: false, breaches: [], foundIn: [], firstSeen: null }];
+  // Websites come from the breach lookup and, after Google sign-in, the inbox scan. With neither there are no websites to
+  // build, so no placeholder posing as one; a check that couldn't run still shows one 'unknown' entry for Elliot Memorial.
+  const entries = result.accounts.length ? result.accounts : result.status === 'unknown' ? [{ name: result.label, domain: '', breached: false, breaches: [], foundIn: [], firstSeen: null }] : [];
   placementOrder = landmarkSlotOrder();
   // Taller towers go behind shorter ones: take the plots the scatter picked, then give the oldest (tallest) sites the plots
   // furthest from the camera (smallest x + z) and the newest the ones in front.
@@ -1486,7 +1488,7 @@ function installCheck(result) {
   accounts.splice(0, accounts.length, ...next.map(ageBreaches));
   accountsById.clear(); renderedBuildings.forEach((root) => scene.remove(root)); renderedBuildings.clear(); slotOccupants.clear();
   accounts.forEach((account) => { accountsById.set(account.id, account); if (account.slot >= 0) slotOccupants.set(account.slot, account.id); });
-  selectedId = accounts[0].id;
+  selectedId = accounts[0]?.id ?? null;
   if (loadedBuildingModels) accounts.filter((account) => account.slot >= 0).forEach((account) => {
     const model = chooseBuildingModel(account, loadedBuildingModels);
     addAccountBuilding(account, model, buildingScale(model, loadedBuildingModels));
@@ -1494,7 +1496,9 @@ function installCheck(result) {
   syncPlotParks();
   renderOverview(); renderDetails();
   document.querySelector('#service-status').textContent = result.source.startsWith('Demo') ? 'OFFLINE DEMO' : result.status === 'unknown' ? 'CHECK UNAVAILABLE' : 'ACCOUNT VERIFIED';
-  showToast(result.status === 'unknown' ? (result.error || 'Check unavailable') : `Check complete · ${accounts.length} accounts`);
+  showToast(result.status === 'unknown' ? (result.error || 'Check unavailable')
+    : accounts.length ? `Check complete · ${accounts.length} accounts`
+    : 'No breaches for this email. Sign in with Google to scan your inbox for the websites you use.');
 }
 
 // Navbar check action opens the ownership-first check flow.
