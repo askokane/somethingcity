@@ -88,7 +88,7 @@ cd /srv/breach-city && git pull && cd checker && npm ci --omit=dev && systemctl 
 
 - **`/dev` is off** once `PUBLIC_URL` is set. Set `DEV_PAGE=1` in the env file to turn it back on temporarily.
 - **Cookies are `Secure`**, so HTTPS only.
-- **Rate limits per visitor:** 10 code requests an hour, and 30 explanations an hour.
+- **Rate limit per visitor:** 10 code requests an hour.
 - **Email codes need `RESEND_API_KEY` for real users.** Without it, codes only appear in `journalctl`, which works for you but not for judges. Google sign-in doesn't need it.
 - **Google sign-in still only works for test users** (Testing mode): add the judges' Gmail addresses, or demo with the dummy account.
 - **Tiger Data:** if the checker can't reach the database, check the service's IP allow list in the Tiger Data console and add the server's IP.

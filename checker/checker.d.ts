@@ -106,13 +106,6 @@ export interface TimelineYear {
   yours?: string[];
 }
 
-/** POST /api/explain (or the offline fallback built from nextSteps) */
-export interface Explanation {
-  summary: string | null;
-  steps: string[];
-  source?: "Gemini";
-}
-
 export const SOURCE: string;
 export const DEMO_ACCOUNTS: string[]; // "city@demo.test" first: the judged demo
 
@@ -122,7 +115,7 @@ export function checkAccount(input: string, options?: { endpoint?: string }): Pr
 export function checkSignedIn(endpoint: string): Promise<AccountCheck>;
 export function cityLayout(check: AccountCheck, options?: { max?: number; now?: number }): CityLayout;
 export function summarize(check: AccountCheck, now?: number): Summary;
-/** Offline advice for one breach; mine = this email was in it. */
+/** Advice for one breach, for the detail panel (works offline); mine = this email was in it. */
 export function nextSteps(service: string, exposedData?: string[], mine?: boolean): string[];
 export function shortName(name: string, max?: number): string;
 /** Trimmed, lowercased email, or null if invalid. Use for form validation. */

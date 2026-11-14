@@ -1,5 +1,5 @@
 // Breach City live checker server. Run: node checker/server.js
-// Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PORT
+// Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PUBLIC_URL, PORT
 import http from "node:http";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { accountId, lookupDomains, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
@@ -25,7 +25,7 @@ const sha = (s) => createHash("sha256").update(s).digest();
 const json = (res, status, body, headers = {}) => res.writeHead(status, { "content-type": "application/json", ...headers }).end(JSON.stringify(body));
 const cookie = (name, value, maxAge) => `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${maxAge}${SECURE ? "; Secure" : ""}`;
 
-// Per-IP rate limits for the endpoints a stranger could abuse on a public server (code emails, Gemini quota).
+// Per-IP rate limit for the endpoint a stranger could abuse on a public server (sending code emails).
 // Behind Caddy every request comes from loopback, so trust X-Forwarded-For only then.
 // ponytail: in-memory fixed windows, single process; fine for a demo server.
 const hits = new Map(); // "bucket:ip" -> { count, resetAt }
@@ -178,49 +178,6 @@ document.getElementById("out").textContent = r.status
   : (r.error ?? "Not signed in.");
 </script>`;
 
-// --- Gemini: plain-English "what this means for you" for one breach (Gemini prize) ---
-// Sends only public breach metadata (service, date, data types). Never an email, account list or inbox content.
-const explainCache = new Map(); // ponytail: unbounded, but keyed by public breach metadata (a few hundred at most)
-
-async function explain(body) {
-  const { name, date = null, exposedData = [], mine = true } = body;
-  const okText = (s, max) => typeof s === "string" && s.length > 0 && s.length <= max;
-  if (!okText(name, 100) || (date !== null && !okText(date, 20)) || !Array.isArray(exposedData) || exposedData.length > 30 ||
-      !exposedData.every((d) => okText(d, 60)) || typeof mine !== "boolean") return [400, { error: "Bad breach details." }];
-  if (!process.env.GEMINI_API_KEY) return [503, { error: "Explanations aren't configured." }];
-
-  const key = JSON.stringify([name, date, exposedData, mine]);
-  if (explainCache.has(key)) return [200, explainCache.get(key)];
-  const prompt = `Explain this data breach to a non-technical person, calmly and without hype.
-Service: ${name}
-Breach date: ${date ?? "unknown"}
-Data types exposed: ${exposedData.join(", ") || "unknown"}
-${mine ? "Their email address was found in this breach." : "The service was breached, but their email address was NOT found in the leaked data. Do not say their data leaked."}
-Return JSON: "summary" (2-3 sentences: what happened and what it means for them) and "steps" (3-5 short, concrete actions, most important first). No markdown.`;
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL || "gemini-2.5-flash"}:generateContent`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-    body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: { type: "OBJECT", properties: { summary: { type: "STRING" }, steps: { type: "ARRAY", items: { type: "STRING" } } }, required: ["summary", "steps"] },
-      },
-    }),
-    signal: AbortSignal.timeout(20000),
-  }).catch(() => null);
-  console.log(`gemini ${res?.status ?? "no response"}`);
-  try {
-    const out = JSON.parse((await res.json()).candidates[0].content.parts[0].text);
-    if (typeof out.summary !== "string" || !Array.isArray(out.steps)) throw new Error();
-    const result = { summary: out.summary, steps: out.steps.map(String).slice(0, 6), source: "Gemini" };
-    explainCache.set(key, result);
-    return [200, result];
-  } catch {
-    return [502, { error: "Explanation unavailable right now." }]; // frontend falls back to nextSteps()
-  }
-}
-
 // --- Service logos for building signs ---
 // Proxied so the browser never asks xposedornot.com for "the logos of this user's accounts" (that list is personal).
 // Only catalog logo URLs on xposedornot.com are fetched, looked up by breach id, so this can't fetch arbitrary URLs.
@@ -294,10 +251,6 @@ export const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true }, { "set-cookie": cookie("bc_session", "", 0) });
     }
     if (path === "/api/check") return json(res, ...(await check(req, body)));
-    if (path === "/api/explain") {
-      if (limited(req, "explain", 30, 60 * 60e3)) return json(res, 429, { error: "Too many requests. Try again later." });
-      return json(res, ...(await explain(body)));
-    }
     if (path === "/api/timeline/mine") {
       // POST, not GET: a list of someone's account domains shouldn't sit in URLs or access logs.
       const domains = body.domains;
@@ -308,6 +261,7 @@ export const server = http.createServer(async (req, res) => {
       return rows ? json(res, 200, rows) : json(res, 503, { error: "Timeline unavailable." });
     }
 
+    if (path !== "/api/verify/start" && path !== "/api/verify/confirm") return res.writeHead(404).end();
     const email = normalizeEmail(body.email);
     if (!email) return json(res, 400, { error: "Enter a valid email address." });
     if (path === "/api/verify/start") {
@@ -315,8 +269,7 @@ export const server = http.createServer(async (req, res) => {
       if (limited(req, "codes", 10, 60 * 60e3)) return json(res, 429, { error: "Too many codes requested. Try again later." });
       return json(res, ...(await verifyStart(email)));
     }
-    if (path === "/api/verify/confirm") return json(res, ...verifyConfirm(email, body.code));
-    res.writeHead(404).end();
+    return json(res, ...verifyConfirm(email, body.code));
   } catch {
     if (!res.headersSent) json(res, 500, { error: "Something went wrong." }); // no details: they could contain user data
   }
@@ -327,7 +280,5 @@ if (import.meta.main) {
     console.log(`Breach City checker on http://localhost:${PORT}${PUBLIC_URL ? ` (public: ${PUBLIC_URL}, /dev ${DEV_PAGE_ON ? "on" : "off"})` : ""}`);
     console.log(`  email codes: ${process.env.RESEND_API_KEY ? "sent with Resend" : "printed here (no RESEND_API_KEY)"}`);
     console.log(`  Google sign-in + inbox scan: ${process.env.GOOGLE_CLIENT_ID ? "on" : "off (no GOOGLE_CLIENT_ID)"}`);
-    console.log(`  Tiger Data timeline + service breaches: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL; using in-memory catalog)"}`);
-    console.log(`  Gemini explanations: ${process.env.GEMINI_API_KEY ? "on" : "off (no GEMINI_API_KEY; frontend uses nextSteps())"}`);
-  });
+    console.log(`  Tiger Data timeline + service breaches: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL; using in-memory catalog)"}`);  });
 }

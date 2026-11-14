@@ -158,14 +158,7 @@ assert.equal((await fetch(`${base}/api/check`, { method: "POST", body: "{}" })).
 const g = await fetch(`${base}/auth/google`, { redirect: "manual" });
 if (!process.env.GOOGLE_CLIENT_ID) assert.equal(g.status, 503); // not configured
 else assert.ok(g.status === 302 && g.headers.get("location").startsWith("https://accounts.google.com/"));
-assert.equal((await post("/api/explain", { name: "x".repeat(500) })).status, 400); // validated
-const ex = await post("/api/explain", { name: "Adobe", date: "2013-10-01", exposedData: ["Passwords"], mine: true });
-if (!process.env.GEMINI_API_KEY) assert.equal(ex.status, 503); // frontend falls back to nextSteps()
-else {
-  const e = await ex.json();
-  assert.ok(ex.status === 200 && e.summary && e.steps.length, `gemini: ${ex.status} ${JSON.stringify(e)}`);
-  console.log(`gemini: ${e.summary.slice(0, 80)}…`);
-}
+assert.equal((await post("/api/explain", { name: "Adobe" })).status, 404); // removed: advice comes from nextSteps()
 assert.equal((await post("/api/timeline/mine", { domains: ["not a domain!"] })).status, 400);
 const tl = await fetch(`${base}/api/timeline`);
 if (!process.env.DATABASE_URL) assert.equal(tl.status, 503); // not configured
