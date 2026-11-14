@@ -1,0 +1,10 @@
+{
+  "id": 3,
+  "name": "The Warden Spire",
+  "height_m": 17.68,
+  "tile_m": [
+    10.1,
+    9.2
+  ],
+  "style": "Gotham-inspired 8-bit"
+}

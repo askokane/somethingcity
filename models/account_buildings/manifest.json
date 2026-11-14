@@ -1,0 +1,15 @@
+{
+  "collection": "Gotham-inspired account buildings",
+  "account_slots": [
+    {"slot": "account_01", "name": "Night Ledger", "profile": "mansard townhouse", "height_m": 9.78, "blend": "account_building_01.blend", "glb": "account_building_01.glb", "render": "account_building_01.png"},
+    {"slot": "account_02", "name": "Ash Exchange", "profile": "stepped Art Deco annex", "height_m": 13.60, "blend": "account_building_02.blend", "glb": "account_building_02.glb", "render": "account_building_02.png"},
+    {"slot": "account_03", "name": "Warden Spire", "profile": "narrow setback tower", "height_m": 17.68, "blend": "account_building_03.blend", "glb": "account_building_03.glb", "render": "account_building_03.png"},
+    {"slot": "account_04", "name": "Stonefront Hall", "profile": "broad Art Deco hall", "height_m": 21.42, "blend": "account_building_04.blend", "glb": "account_building_04.glb", "render": "account_building_04.png"},
+    {"slot": "account_05", "name": "Twin Crown", "profile": "warm brick twin-crown tower", "height_m": 25.35, "blend": "account_building_05.blend", "glb": "account_building_05.glb", "render": "account_building_05.png"},
+    {"slot": "account_06", "name": "Buttress Tower", "profile": "cathedral-influenced needle", "height_m": 29.32, "blend": "account_building_06.blend", "glb": "account_building_06.glb", "render": "account_building_06.png"},
+    {"slot": "account_07", "name": "Sentinel Crown", "profile": "stepped roof crown", "height_m": 33.32, "blend": "account_building_07.blend", "glb": "account_building_07.glb", "render": "account_building_07.png"},
+    {"slot": "account_08", "name": "Twin Spires", "profile": "paired Gothic spires", "height_m": 37.32, "blend": "account_building_08.blend", "glb": "account_building_08.glb", "render": "account_building_08.png"},
+    {"slot": "account_09", "name": "Eclipse Crown", "profile": "faceted roof crown", "height_m": 41.32, "blend": "account_building_09.blend", "glb": "account_building_09.glb", "render": "account_building_09.png"},
+    {"slot": "account_10", "name": "Needle Pinnacle", "profile": "slender pinnacle", "height_m": 45.32, "blend": "account_building_10.blend", "glb": "account_building_10.glb", "render": "account_building_10.png"}
+  ]
+}
