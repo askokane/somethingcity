@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellZ } from './city-layout.js';
+import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellZ, isOnLand } from './city-layout.js';
 import { scatterSlotOrder, freshPlacementSeed, seededRandom as placementRandomGenerator } from './city-scatter.js';
 import { checkAccount, checkSignedIn } from './checker/checker.js';
 import { buildMissions, readProgress, saveProgress, serviceUrl } from './mission-board.js';
@@ -578,8 +578,97 @@ function buildSuburbs() {
   if (tree) yards.forEach(([x, z], i) => group.add(addPlacedModel(tree, [x, 0.23, z], scaleForHeight(tree, 3 + (i % 5) * 0.8), i)));
 }
 
+// Atharva's harbor fleet (models/ships: keel at y 0, bow along +X, city units). Each vessel rides the actual wave under
+// it (the sea shader's height formula, copied below) and moves the way its motion hint describes: fishing boats drift,
+// beach boats sit moored, the tug and the GCPD patrol run circuits, the ferry and the barge shuttle, and the container
+// ship passes slowly on the horizon.
+const SHIPS = [
+  { file: 'horizon_container_ship_narrows', mode: 'pass', from: [150, -230], to: [150, 230], speed: 1.6 },
+  { file: 'gcpd_harbor_patrol', mode: 'loop', centre: [-18, -6], radius: [160, 160], speed: 5 }, // clears every corner of the map
+  { file: 'tugboat_east_quay', mode: 'loop', centre: [104, 36], radius: [8, 16], speed: 2.2 },
+  { file: 'bristol_midtown_ferry', mode: 'shuttle', from: [-84, 12], to: [-36, 12], speed: 2.4 }, // lower inlet, west of the bridge
+  { file: 'cargo_barge_gotham_river', mode: 'shuttle', from: [-76, -104], to: [-76, -40], speed: 1.4 }, // Gotham River, north of the bridges
+  { file: 'fishing_trawler_narrows', mode: 'drift', at: [118, -62], heading: 2.2 },
+  { file: 'fishing_longliner_crown_point', mode: 'drift', at: [102, -104], heading: 0.6 },
+  { file: 'fishing_skiff_blackgate', mode: 'drift', at: [-66, 116], heading: -0.9 },
+  { file: 'sailboat_west_bay', mode: 'moored', at: [-60, -38], heading: Math.PI / 2 }, // off Reatton Beach
+  { file: 'schooner_west_bay', mode: 'moored', at: [-64, -60], heading: 0.3 },
+  { file: 'rowboat_beach_cove', mode: 'moored', at: [4, 80], heading: 1.2 }, // off Stevensburgh Strand
+  { file: 'rowboat_blackgate_cove', mode: 'moored', at: [-10, 92], heading: -0.4 }, // South Hinkley
+];
+const SHIP_DRAFT = 0.3; // how far each hull sits below the surface
+// Height of the sea surface at (x, z): the same formula as stylized-sea.js's vertex shader.
+function seaHeight(x, z, time) {
+  const phase = time * 0.06981317;
+  const warp = x * 0.027 - z * 0.031;
+  const a = x * 0.115 + z * 0.078 + 1.1 * Math.sin(warp) - phase;
+  const b = x * -0.055 + z * 0.16 + 0.6 * Math.sin(x * 0.035) + phase;
+  const s = Math.sin(a);
+  return -1.1 + 0.44 * s + 0.1 * s * s + 0.13 * Math.sin(b);
+}
+const fleet = [];
+let fleetLaunched = false;
+async function launchShips() {
+  if (fleetLaunched) return;
+  fleetLaunched = true;
+  const group = new THREE.Group();
+  group.name = 'Gotham harbor fleet';
+  scene.add(group);
+  await Promise.all(SHIPS.map(async (spec, i) => {
+    const model = await loadModel(`./models/ships/${spec.file}.glb`).catch(() => null);
+    if (!model) return;
+    const anchor = spec.at ?? spec.from ?? spec.centre;
+    if (spec.at && isOnLand(spec.at[0], spec.at[1], -2.5)) { console.warn(`${spec.file} would sit on land; skipped`); return; }
+    model.rotation.order = 'YXZ';
+    model.traverse((node) => { if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
+    group.add(model);
+    const length = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).x;
+    fleet.push({ ...spec, model, length, phase: i * 1.7, anchor });
+  }));
+}
+function updateShips(time) {
+  for (const ship of fleet) {
+    let x, z, hx, hz;
+    if (ship.mode === 'loop') {
+      const [cx, cz] = ship.centre;
+      const [rx, rz] = ship.radius;
+      const angle = time * ship.speed / ((rx + rz) / 2) + ship.phase;
+      [x, z] = [cx + Math.cos(angle) * rx, cz + Math.sin(angle) * rz];
+      [hx, hz] = [-Math.sin(angle) * rx, Math.cos(angle) * rz];
+    } else if (ship.mode === 'shuttle' || ship.mode === 'pass') {
+      const [[x1, z1], [x2, z2]] = [ship.from, ship.to];
+      const length = Math.hypot(x2 - x1, z2 - z1);
+      const run = (time * ship.speed + ship.phase * 10) / length;
+      let t = run % 2;
+      const back = ship.mode === 'shuttle' && t > 1;
+      if (ship.mode === 'pass') t = run % 1; else if (back) t = 2 - t;
+      const eased = ship.mode === 'shuttle' ? t * t * (3 - 2 * t) : t; // the ferry and barge slow down at each end
+      [x, z] = [x1 + (x2 - x1) * eased, z1 + (z2 - z1) * eased];
+      [hx, hz] = back ? [x1 - x2, z1 - z2] : [x2 - x1, z2 - z1];
+    } else {
+      const [ax, az] = ship.anchor;
+      const sway = ship.mode === 'drift' ? 2.5 : 0.4; // fishing boats wander on their lines; moored boats barely move
+      const t = time * 0.05 + ship.phase;
+      [x, z] = [ax + Math.sin(t) * sway, az + Math.cos(t * 0.7) * sway];
+      const yaw = ship.heading + Math.sin(time * 0.2 + ship.phase) * (ship.mode === 'drift' ? 0.35 : 0.12);
+      [hx, hz] = [Math.cos(yaw), -Math.sin(yaw)];
+    }
+    const yaw = Math.atan2(-hz, hx);
+    const fx = Math.cos(yaw), fz = -Math.sin(yaw);
+    const half = ship.length / 2;
+    const bow = seaHeight(x + fx * half, z + fz * half, time);
+    const stern = seaHeight(x - fx * half, z - fz * half, time);
+    const port = seaHeight(x - fz, z + fx, time);
+    const starboard = seaHeight(x + fz, z - fx, time);
+    ship.model.position.set(x, (bow + stern) / 2 - SHIP_DRAFT, z);
+    // Pitch with the bow and stern heights, roll with the sides, kept gentle.
+    ship.model.rotation.set(Math.atan2(port - starboard, 2) * 0.6, yaw, Math.atan2(bow - stern, ship.length) * 0.8);
+  }
+}
+
 function finishInitialLoad() {
   if (!environmentReady || !accountModelsReady) return;
+  launchShips();
   buildSuburbs();
   syncPlotParks();
   syncPlotParks();
@@ -1686,6 +1775,7 @@ resizeScene();
 
 function animate() {
   city.update(performance.now() / 1000);
+  updateShips(performance.now() / 1000);
   controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
