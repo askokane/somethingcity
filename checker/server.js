@@ -2,9 +2,9 @@
 // Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PORT
 import http from "node:http";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
-import { accountId, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
+import { accountId, lookupDomains, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
 import { checkXon, scanInbox } from "./sources.js";
-import { timeline } from "./db.js";
+import { serviceBreaches, timeline } from "./db.js";
 
 const PORT = Number(process.env.PORT) || 8787;
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
@@ -149,10 +149,53 @@ const post = (p) => fetch(p, { method: "POST", headers: { "content-type": "appli
 document.getElementById("logout").onclick = async (e) => { e.preventDefault(); await post("/api/logout"); location.href = "/dev"; };
 const r = await post("/api/check").then((x) => x.json());
 document.getElementById("out").textContent = r.status
-  ? \`\${r.label}: \${r.status} (\${r.source})\${r.error ? " - " + r.error : ""}\\n\${r.accounts.length} linked accounts, \${r.accounts.filter((a) => a.breached).length} breached\\n\\n\` +
-    r.accounts.map((a) => \`\${a.breached ? "BREACHED" : "ok      "}  \${a.name.slice(0, 28).padEnd(28)} \${a.domain.padEnd(26)} \${a.foundIn.join("+").padEnd(13)} \${a.firstSeen ?? ""}\`).join("\\n")
+  ? \`\${r.label}: \${r.status} (\${r.source})\${r.error ? " - " + r.error : ""}\\n\${r.accounts.length} linked accounts, \${r.accounts.filter((a) => a.breached).length} with your data breached, \${r.accounts.filter((a) => !a.breached && a.serviceBreaches?.length).length} more on breached services\\n\\n\` +
+    r.accounts.map((a) => \`\${a.breached ? "BREACHED" : a.serviceBreaches?.length ? "SERVICE " : "ok      "}  \${a.name.slice(0, 28).padEnd(28)} \${a.domain.padEnd(26)} \${a.foundIn.join("+").padEnd(13)} \${(a.firstSeen ?? "").padEnd(11)} \${(a.serviceBreaches ?? []).map((b) => b.name + " " + b.date.slice(0, 4)).join(", ")}\`).join("\\n")
   : (r.error ?? "Not signed in.");
 </script>`;
+
+// --- Gemini: plain-English "what this means for you" for one breach (Gemini prize) ---
+// Sends only public breach metadata (service, date, data types). Never an email, account list or inbox content.
+const explainCache = new Map(); // ponytail: unbounded, but keyed by public breach metadata (a few hundred at most)
+
+async function explain(body) {
+  const { name, date = null, exposedData = [], mine = true } = body;
+  const okText = (s, max) => typeof s === "string" && s.length > 0 && s.length <= max;
+  if (!okText(name, 100) || (date !== null && !okText(date, 20)) || !Array.isArray(exposedData) || exposedData.length > 30 ||
+      !exposedData.every((d) => okText(d, 60)) || typeof mine !== "boolean") return [400, { error: "Bad breach details." }];
+  if (!process.env.GEMINI_API_KEY) return [503, { error: "Explanations aren't configured." }];
+
+  const key = JSON.stringify([name, date, exposedData, mine]);
+  if (explainCache.has(key)) return [200, explainCache.get(key)];
+  const prompt = `Explain this data breach to a non-technical person, calmly and without hype.
+Service: ${name}
+Breach date: ${date ?? "unknown"}
+Data types exposed: ${exposedData.join(", ") || "unknown"}
+${mine ? "Their email address was found in this breach." : "The service was breached, but their email address was NOT found in the leaked data. Do not say their data leaked."}
+Return JSON: "summary" (2-3 sentences: what happened and what it means for them) and "steps" (3-5 short, concrete actions, most important first). No markdown.`;
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${process.env.GEMINI_MODEL || "gemini-2.5-flash"}:generateContent`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: { type: "OBJECT", properties: { summary: { type: "STRING" }, steps: { type: "ARRAY", items: { type: "STRING" } } }, required: ["summary", "steps"] },
+      },
+    }),
+    signal: AbortSignal.timeout(20000),
+  }).catch(() => null);
+  console.log(`gemini ${res?.status ?? "no response"}`);
+  try {
+    const out = JSON.parse((await res.json()).candidates[0].content.parts[0].text);
+    if (typeof out.summary !== "string" || !Array.isArray(out.steps)) throw new Error();
+    const result = { summary: out.summary, steps: out.steps.map(String).slice(0, 6), source: "Gemini" };
+    explainCache.set(key, result);
+    return [200, result];
+  } catch {
+    return [502, { error: "Explanation unavailable right now." }]; // frontend falls back to nextSteps()
+  }
+}
 
 // --- Live check for the signed-in email ---
 
@@ -161,7 +204,10 @@ async function check(req, body) {
   const email = body.email === undefined ? session?.email : normalizeEmail(body.email);
   if (!session || email !== session.email) return [401, { error: "Verify this email first." }];
   const result = await checkXon(email);
-  return [200, { id: await accountId(email), label: maskEmail(email), ...result, accounts: toAccounts(result.breaches, session.inbox ?? []) }];
+  const inbox = session.inbox ?? [];
+  const domains = lookupDomains([...inbox.map((a) => a.domain), ...result.breaches.map((b) => b.domain).filter(Boolean)]);
+  const serviceMap = await serviceBreaches(domains).catch(() => new Map()); // Tiger Data join; never blocks the check
+  return [200, { id: await accountId(email), label: maskEmail(email), ...result, accounts: toAccounts(result.breaches, inbox, serviceMap) }];
 }
 
 export const server = http.createServer(async (req, res) => {
@@ -199,6 +245,7 @@ export const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true }, { "set-cookie": cookie("bc_session", "", 0) });
     }
     if (path === "/api/check") return json(res, ...(await check(req, body)));
+    if (path === "/api/explain") return json(res, ...(await explain(body)));
 
     const email = normalizeEmail(body.email);
     if (!email) return json(res, 400, { error: "Enter a valid email address." });
@@ -215,6 +262,7 @@ if (import.meta.main) {
     console.log(`Breach City checker on http://localhost:${PORT}`);
     console.log(`  email codes: ${process.env.RESEND_API_KEY ? "sent with Resend" : "printed here (no RESEND_API_KEY)"}`);
     console.log(`  Google sign-in + inbox scan: ${process.env.GOOGLE_CLIENT_ID ? "on" : "off (no GOOGLE_CLIENT_ID)"}`);
-    console.log(`  Tiger Data timeline: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL)"}`);
+    console.log(`  Tiger Data timeline + service breaches: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL; using in-memory catalog)"}`);
+    console.log(`  Gemini explanations: ${process.env.GEMINI_API_KEY ? "on" : "off (no GEMINI_API_KEY; frontend uses nextSteps())"}`);
   });
 }

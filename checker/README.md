@@ -24,9 +24,23 @@ Given an email the user has **proven they own**, the checker returns every servi
     breaches: string[];                   // breach names that hit this service
     foundIn: Array<"inbox" | "breach">;   // how we know the account exists
     firstSeen: string | null;             // earliest sign-up email, YYYY-MM-DD
+    serviceBreaches: Array<{              // every known breach OF THIS SERVICE, newest first,
+      name: string; date: string;         //   even if this user's email wasn't in it
+      exposedData: string[]; records: number | null;
+    }>;
   };
   ```
 - **`Breach.domain?: string | null`**, which links a breach to its account.
+
+**Three building states.** Accounts come sorted in this order:
+
+| State | Test | Meaning | Suggested look |
+|---|---|---|---|
+| Your data breached | `breached` | This email was in the leak | Alert: red, damaged |
+| Service breached | `!breached && serviceBreaches.length` | The service was breached; this email wasn't found in the leak | Warning: amber |
+| No known breach | otherwise | Nothing known for this service | Calm |
+
+The overall `status: "unknown"` (check unavailable) still applies to the whole result, as before.
 
 `accounts` comes from the inbox scan only if the user signed in with Google and allowed Gmail access. Otherwise it lists only the breached services.
 
@@ -49,6 +63,12 @@ location.href = `${API}/auth/google`;
 // ...Google sends the user back to FRONTEND_URL/?signin=ok (or no-inbox / failed). Then:
 const mine = await checkSignedIn(`${API}/api/check`);
 
+// Detail panel: what this breach means + what to do. Gemini when configured, else the offline list.
+import { nextSteps } from "./checker/checker.js";
+const r = await fetch(`${API}/api/explain`, { method: "POST", headers: { "content-type": "application/json" },
+  body: JSON.stringify({ name: b.name, date: b.date, exposedData: b.exposedData, mine: account.breached }) });
+const help = r.ok ? await r.json() : { summary: null, steps: nextSteps(account.name, b.exposedData, account.breached) };
+
 // Breach timeline for the Tiger Data view: [{ year, breaches, records }]
 const years = await fetch(`${API}/api/timeline`).then((r) => r.ok ? r.json() : null);
 
@@ -65,8 +85,9 @@ await fetch(`${API}/api/logout`, { method: "POST", credentials: "include", heade
 
 | Email | Status | Accounts |
 |---|---|---|
-| `breached@demo.test` | `breached` | PixelMart and TrailNote breached; BookNook and Streamly clean |
-| `clear@demo.test` | `clear` | Streamly and FitLoop, both clean |
+| **`city@demo.test`** | `breached` | **The judged demo.** 20 real services with **real** breach names, dates and data types: 2 with "your" data (LinkedIn 2021, MyFitnessPal 2018), 9 on breached services (Adobe 2013, Dropbox 2012, Canva 2019…), 9 clean. Which breaches include "your" email is made up. |
+| `breached@demo.test` | `breached` | PixelMart and TrailNote breached; Streamly on a breached service; BookNook clean |
+| `clear@demo.test` | `clear` | Streamly (breached service) and FitLoop (clean) |
 | `unknown@demo.test` | `unknown` | none, with `error` set |
 
 ## Running the server
@@ -110,11 +131,19 @@ Each step happens in your own Google account:
 
 Without `RESEND_API_KEY`, codes print in the server console, which is fine for the demo. With a free [Resend](https://resend.com) key, real emails go out. Until you verify a domain with Resend, its default sender (`onboarding@resend.dev`) only delivers to the address you signed up to Resend with.
 
-### Tiger Data (breach timeline)
+### Tiger Data (breach timeline + service breaches)
 
 1. Create a free service at [Tiger Data](https://www.tigerdata.com/) and copy its connection string into `DATABASE_URL`.
-2. Run `npm run load-timeline`. It creates a `breaches` hypertable and loads XposedOrNot's public catalog of about 800 breaches. It's safe to re-run.
-3. `GET /api/timeline` returns breaches and exposed records per year, using `time_bucket`.
+2. Run `npm run load-timeline`. It creates a `breaches` hypertable and loads XposedOrNot's public catalog of about 800 breaches, with an indexed `base_domain` column. It's safe to re-run.
+3. It powers two things:
+   - `GET /api/timeline` returns breaches and exposed records per year, using `time_bucket`.
+   - **Every live check** joins the user's accounts against the hypertable by domain to fill in `serviceBreaches`. If Tiger Data is down or unset, it falls back to the in-memory catalog, so checks never fail because of it.
+
+### Gemini (breach explanations)
+
+1. Get a free API key at [Google AI Studio](https://aistudio.google.com/) and set `GEMINI_API_KEY`. `GEMINI_MODEL` defaults to `gemini-2.5-flash`.
+2. `POST /api/explain` with `{ name, date, exposedData, mine }` returns `{ summary, steps, source: "Gemini" }`. Results are cached per breach. Without a key it returns 503, and the frontend uses `nextSteps()` instead.
+3. Gemini only ever receives **public breach metadata**: the service name, breach date, data types, and whether this user's email was in it. Never an email, account list or inbox content.
 
 Only the public breach catalog goes in the database. No emails, sessions or check results are stored.
 
@@ -128,6 +157,7 @@ Only the public breach catalog goes in the database. No emails, sessions or chec
   - The list of found services lives in server memory for the 1-hour session.
 - **Codes** are stored only as hashes. Each expires after 10 minutes, allows at most 5 tries, and works once.
 - **Server logs** contain status codes, masked emails and scan counts only. No service names or subjects are logged.
+- **Lookup cache:** XposedOrNot answers are kept in memory for 30 minutes, keyed by a hash of the email, so a rate limit or network blip mid-demo reuses the last good answer instead of showing unknown. It's gone when the server restarts.
 - **CORS:** the server only accepts browser requests from `localhost` pages and only takes JSON, so other sites can't use it.
 
 ## How the inbox scan finds accounts

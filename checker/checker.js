@@ -1,4 +1,5 @@
 // Breach City account checker. Plain ES module: works in the browser and in Node 20+, no build step.
+import { CITY } from "./demo-city.js";
 
 /**
  * @typedef {{ name: string, date: string | null, exposedData: string[], domain?: string | null }} Breach
@@ -9,7 +10,9 @@
  *   breaches: string[],       // names of breaches that hit this service
  *   foundIn: Array<"inbox" | "breach">,
  *   firstSeen: string | null, // earliest inbox email date (YYYY-MM-DD), if found in the inbox
+ *   serviceBreaches: ServiceBreach[], // every known breach OF THIS SERVICE, even if your email wasn't in it (newest first)
  * }} Account
+ * @typedef {{ name: string, date: string, exposedData: string[], records: number | null }} ServiceBreach
  * @typedef {{
  *   id: string,
  *   label: string,
@@ -57,8 +60,17 @@ export function serviceKey(domain) {
   return stripped.length >= 3 ? stripped : label;
 }
 
-/** Merge inbox-found services with breached services into one list, breached first. */
-export function toAccounts(breaches, inbox = []) {
+/** Domains to look up service breaches for: each account's own domain, plus "<key>.com" (lyftmail.com -> lyft.com). */
+export function lookupDomains(domains) {
+  return [...new Set(domains.flatMap((d) => [d, `${serviceKey(d)}.com`]))];
+}
+
+/**
+ * Merge inbox-found services with breached services into one list:
+ * your email breached first, then services that were breached (without your email), then the rest.
+ * serviceMap: Map(base domain -> ServiceBreach[]) from db.js serviceBreaches().
+ */
+export function toAccounts(breaches, inbox = [], serviceMap = new Map()) {
   const byDomain = new Map(inbox.map((a) => [serviceKey(a.domain), { ...a, breached: false, breaches: [], foundIn: ["inbox"] }]));
   for (const b of breaches) {
     if (!b.domain) continue; // e.g. stealer-log dumps aren't a service account
@@ -68,7 +80,30 @@ export function toAccounts(breaches, inbox = []) {
     a.breached = true;
     a.breaches.push(b.name);
   }
-  return [...byDomain.values()].sort((x, y) => y.breached - x.breached || x.name.localeCompare(y.name));
+  const accounts = [...byDomain.values()];
+  for (const a of accounts) a.serviceBreaches = serviceMap.get(a.domain) ?? serviceMap.get(`${serviceKey(a.domain)}.com`) ?? [];
+  const rank = (a) => (a.breached ? 2 : a.serviceBreaches.length ? 1 : 0);
+  return accounts.sort((x, y) => rank(y) - rank(x) || x.name.localeCompare(y.name));
+}
+
+/**
+ * A short, calm to-do list for one breach, from what leaked. Works offline; use it when /api/explain (Gemini) isn't available.
+ * mine: true if the user's email was in this breach, false if only the service was breached.
+ */
+export function nextSteps(service, exposedData = [], mine = true) {
+  const has = (re) => exposedData.some((d) => re.test(d));
+  const steps = [];
+  if (!mine) steps.push(`Your email wasn't found in this leak, but if you had a ${service} account back then, change that password to be safe.`);
+  else if (has(/password/i)) steps.push(`Change your ${service} password, and the password on any other site where you reused it.`);
+  else steps.push(`Review your ${service} account for activity you don't recognize.`);
+  steps.push(`Turn on two-step verification (2FA) for ${service}.`);
+  if (has(/password/i)) steps.push("Use a password manager so every site gets its own unique password.");
+  if (has(/phone/i)) steps.push("Be wary of scam texts and calls, and ask your carrier for a SIM-swap PIN.");
+  if (has(/email/i)) steps.push(`Expect phishing emails that mention ${service}; sign in by typing the address, not by clicking links.`);
+  if (has(/date of birth|dates of birth|physical address|social security|government/i)) steps.push("Watch for identity-theft attempts; consider freezing your credit.");
+  if (has(/credit card|bank|payment/i)) steps.push("Check your card and bank statements, and ask your bank about a replacement card.");
+  if (has(/security question/i)) steps.push("Change any security questions that used the same answers elsewhere.");
+  return steps;
 }
 
 // Fictional services. Categories only: never leaked values.
@@ -91,10 +126,19 @@ const FIXTURES = {
       { name: "FitLoop", domain: "fitloop.example", firstSeen: "2024-01-15" },
     ],
   },
+  // The judged demo: 20 real services with real breach history, fully offline (see demo-city.js).
+  "city@demo.test": { breaches: CITY.breaches, inbox: CITY.inbox, services: new Map(CITY.services) },
   // "unknown@demo.test" (and any other address) has no entry, so the check is unavailable.
 };
 
-export const DEMO_ACCOUNTS = ["breached@demo.test", "clear@demo.test", "unknown@demo.test"];
+// Fictional service-level breaches: Streamly was breached, but these demo emails weren't in it.
+const FIXTURE_SERVICE_BREACHES = new Map([
+  ["streamly.example", [{ name: "Streamly", date: "2022-09-30", exposedData: ["Email addresses", "Names", "Passwords"], records: 4200000 }]],
+  ["pixelmart.example", [{ name: "PixelMart", date: "2021-06-14", exposedData: ["Email addresses", "Passwords", "Usernames"], records: 1300000 }]],
+  ["trailnote.example", [{ name: "TrailNote", date: "2023-02-03", exposedData: ["Email addresses", "IP addresses"], records: 870000 }]],
+]);
+
+export const DEMO_ACCOUNTS = ["city@demo.test", "breached@demo.test", "clear@demo.test", "unknown@demo.test"];
 
 /**
  * Check one account. Throws Error("Enter a valid email address.") on bad input (raw value is never echoed).
@@ -115,7 +159,7 @@ export async function checkAccount(input, { endpoint } = {}) {
   if (!f) {
     return { ...base, checkedAt: null, status: "unknown", breaches: [], accounts: [], error: "Check unavailable: this source has no data for this account." };
   }
-  return { ...base, checkedAt: new Date().toISOString(), status: f.breaches.length ? "breached" : "clear", breaches: f.breaches, accounts: toAccounts(f.breaches, f.inbox) };
+  return { ...base, checkedAt: new Date().toISOString(), status: f.breaches.length ? "breached" : "clear", breaches: f.breaches, accounts: toAccounts(f.breaches, f.inbox, f.services ?? FIXTURE_SERVICE_BREACHES) };
 }
 
 /** Live check for whoever is signed in (Google or email code). Use after the Google redirect, when the page has no email. */

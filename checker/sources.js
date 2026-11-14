@@ -1,4 +1,5 @@
 // Server-side data sources: XposedOrNot breaches and the Gmail inbox scan.
+import { createHash } from "node:crypto";
 import { baseDomain, serviceKey } from "./checker.js";
 
 const XON = "https://api.xposedornot.com/v1";
@@ -16,8 +17,23 @@ export async function getCatalog() {
   return catalog;
 }
 
+// Demo-proofing: reuse a good answer for 30 minutes, so a rate limit or Wi-Fi blip mid-demo doesn't flip buildings to unknown.
+// Keyed by a hash of the email; in memory only, gone on restart. ponytail: unbounded Map, fine for a demo's handful of users.
+const xonCache = new Map(); // sha256(email) -> { result, at }
+const XON_TTL = 30 * 60e3;
+
 /** Breaches for one normalized email. Only an explicit "Not found" is "clear"; anything odd is "unknown". */
 export async function checkXon(email) {
+  const key = createHash("sha256").update(email).digest("hex");
+  const hit = xonCache.get(key);
+  if (hit && Date.now() - hit.at < XON_TTL) return hit.result;
+  const result = await fetchXon(email);
+  if (result.status !== "unknown") xonCache.set(key, { result, at: Date.now() }); // never cache a failure
+  else if (hit) return { ...hit.result, stale: true }; // service down now, but we had an answer: use it
+  return result;
+}
+
+async function fetchXon(email) {
   const unknown = (error) => ({ status: "unknown", breaches: [], checkedAt: null, source: XON_SOURCE, error });
   let data;
   try {

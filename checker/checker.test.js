@@ -16,7 +16,8 @@ assert.equal(baseDomain("news.bbc.co.uk"), "bbc.co.uk");
 const b = await checkAccount("Breached@demo.test");
 assert.equal(b.status, "breached");
 assert.equal(b.breaches.length, 2);
-assert.deepEqual(b.accounts.map((a) => [a.name, a.breached]), [["PixelMart", true], ["TrailNote", true], ["BookNook", false], ["Streamly", false]]);
+// Order: your data breached, then breached services (Streamly), then the rest
+assert.deepEqual(b.accounts.map((a) => [a.name, a.breached, a.serviceBreaches.length]), [["PixelMart", true, 1], ["TrailNote", true, 1], ["Streamly", false, 1], ["BookNook", false, 0]]);
 assert.deepEqual(b.accounts[0].foundIn, ["inbox", "breach"]);
 const c = await checkAccount("clear@demo.test");
 assert.equal(c.status, "clear");
@@ -29,6 +30,21 @@ for (const email of ["unknown@demo.test", "someone@real.com"]) {
 }
 assert.ok(!JSON.stringify(b).includes("breached@demo.test")); // raw email never in the result
 await assert.rejects(checkAccount("secret-bad-input"), (e) => !e.message.includes("secret"));
+
+// Demo city: offline, real breach history, all three building states
+const city = await checkAccount("city@demo.test");
+assert.equal(city.status, "breached");
+assert.equal(city.accounts.length, 20);
+const states = city.accounts.map((a) => (a.breached ? "mine" : a.serviceBreaches.length ? "service" : "ok"));
+assert.ok(states.includes("mine") && states.includes("service") && states.includes("ok"));
+assert.equal(city.accounts.find((a) => a.domain === "adobe.com").serviceBreaches[0].date, "2013-10-01");
+
+// Offline next steps: driven by what leaked, and honest when only the service was breached
+const { nextSteps } = await import("./checker.js");
+const pw = nextSteps("Adobe", ["Email addresses", "Passwords", "Phone numbers"]);
+assert.match(pw[0], /Change your Adobe password/);
+assert.ok(pw.some((s) => /SIM-swap/.test(s)) && pw.some((s) => /password manager/.test(s)));
+assert.match(nextSteps("Canva", ["Email addresses"], false)[0], /wasn't found in this leak/);
 
 // Inbox sender parsing: one account per service, earliest date, people skipped
 assert.deepEqual(sendersToAccounts([
@@ -91,6 +107,14 @@ assert.equal(real.find((a) => a.domain === "facebook.com").firstSeen, "2026-06-2
 const { toAccounts } = await import("./checker.js");
 assert.equal(toAccounts([{ name: "Facebook", domain: "facebook.com" }], [{ name: "Facebook", domain: "facebookmail.com", firstSeen: null }]).length, 1);
 
+// Service breaches: matched by the account's domain or "<key>.com", never marking YOUR data as breached
+const { lookupDomains } = await import("./checker.js");
+assert.deepEqual(lookupDomains(["lyftmail.com", "adobe.com"]), ["lyftmail.com", "lyft.com", "adobe.com"]);
+const svc = new Map([["lyft.com", [{ name: "Lyft", date: "2020-01-01", exposedData: [], records: null }]]]);
+const [lyft] = toAccounts([], [{ name: "Lyft", domain: "lyftmail.com", firstSeen: null }], svc);
+assert.equal(lyft.breached, false);
+assert.equal(lyft.serviceBreaches[0].name, "Lyft");
+
 // Server: verification gate, codes, sessions
 await new Promise((r) => server.listen(0, "localhost", r));
 const base = `http://localhost:${server.address().port}`;
@@ -103,6 +127,14 @@ assert.equal((await fetch(`${base}/api/check`, { method: "POST", body: "{}" })).
 const g = await fetch(`${base}/auth/google`, { redirect: "manual" });
 if (!process.env.GOOGLE_CLIENT_ID) assert.equal(g.status, 503); // not configured
 else assert.ok(g.status === 302 && g.headers.get("location").startsWith("https://accounts.google.com/"));
+assert.equal((await post("/api/explain", { name: "x".repeat(500) })).status, 400); // validated
+const ex = await post("/api/explain", { name: "Adobe", date: "2013-10-01", exposedData: ["Passwords"], mine: true });
+if (!process.env.GEMINI_API_KEY) assert.equal(ex.status, 503); // frontend falls back to nextSteps()
+else {
+  const e = await ex.json();
+  assert.ok(ex.status === 200 && e.summary && e.steps.length, `gemini: ${ex.status} ${JSON.stringify(e)}`);
+  console.log(`gemini: ${e.summary.slice(0, 80)}…`);
+}
 const tl = await fetch(`${base}/api/timeline`);
 if (!process.env.DATABASE_URL) assert.equal(tl.status, 503); // not configured
 else {
@@ -134,10 +166,19 @@ if (process.env.LIVE || process.argv.includes("--live")) {
   assert.equal(r.label, "t***@example.com");
   assert.ok(r.breaches.length > 10 && r.breaches.some((x) => x.domain === "adobe.com" && x.date));
   assert.ok(r.accounts.length > 5 && r.accounts.every((a) => a.breached && a.foundIn[0] === "breach"));
+  assert.ok(r.accounts.find((a) => a.domain === "adobe.com").serviceBreaches.some((x) => x.name === "Adobe" && x.date.startsWith("2013")));
   console.log(`live: ${r.breaches.length} breaches -> ${r.accounts.length} accounts, e.g. ${r.accounts.slice(0, 3).map((a) => a.name).join(", ")}`);
 
   const { checkXon } = await import("./sources.js");
   assert.equal((await checkXon("zq7x9k2m4breachcity@example.com")).status, "clear");
+  // Cached: the repeat check makes no request (no "xon" log line) and returns the same answer
+  const logged = [];
+  const realLog = console.log;
+  console.log = (...a) => logged.push(a.join(" "));
+  const again = await checkXon("zq7x9k2m4breachcity@example.com");
+  console.log = realLog;
+  assert.equal(again.status, "clear");
+  assert.ok(!logged.some((l) => l.startsWith("xon")));
 }
 
 assert.equal((await post("/api/logout", {}, { cookie: session })).status, 200);
