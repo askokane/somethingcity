@@ -1,4 +1,5 @@
 // Breach City account checker. Plain ES module: works in the browser and in Node 20+, no build step.
+import { CITY } from "./demo-city.js";
 
 /**
  * @typedef {{ name: string, date: string | null, exposedData: string[], domain?: string | null }} Breach
@@ -105,6 +106,8 @@ const FIXTURES = {
       { name: "FitLoop", domain: "fitloop.example", firstSeen: "2024-01-15" },
     ],
   },
+  // The judged demo: 20 real services with real breach history, fully offline (see demo-city.js).
+  "city@demo.test": { breaches: CITY.breaches, inbox: CITY.inbox, services: new Map(CITY.services) },
   // "unknown@demo.test" (and any other address) has no entry, so the check is unavailable.
 };
 
@@ -115,7 +118,7 @@ const FIXTURE_SERVICE_BREACHES = new Map([
   ["trailnote.example", [{ name: "TrailNote", date: "2023-02-03", exposedData: ["Email addresses", "IP addresses"], records: 870000 }]],
 ]);
 
-export const DEMO_ACCOUNTS = ["breached@demo.test", "clear@demo.test", "unknown@demo.test"];
+export const DEMO_ACCOUNTS = ["city@demo.test", "breached@demo.test", "clear@demo.test", "unknown@demo.test"];
 
 /**
  * Check one account. Throws Error("Enter a valid email address.") on bad input (raw value is never echoed).
@@ -136,7 +139,7 @@ export async function checkAccount(input, { endpoint } = {}) {
   if (!f) {
     return { ...base, checkedAt: null, status: "unknown", breaches: [], accounts: [], error: "Check unavailable: this source has no data for this account." };
   }
-  return { ...base, checkedAt: new Date().toISOString(), status: f.breaches.length ? "breached" : "clear", breaches: f.breaches, accounts: toAccounts(f.breaches, f.inbox, FIXTURE_SERVICE_BREACHES) };
+  return { ...base, checkedAt: new Date().toISOString(), status: f.breaches.length ? "breached" : "clear", breaches: f.breaches, accounts: toAccounts(f.breaches, f.inbox, f.services ?? FIXTURE_SERVICE_BREACHES) };
 }
 
 /** Live check for whoever is signed in (Google or email code). Use after the Google redirect, when the page has no email. */

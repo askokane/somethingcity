@@ -31,6 +31,14 @@ for (const email of ["unknown@demo.test", "someone@real.com"]) {
 assert.ok(!JSON.stringify(b).includes("breached@demo.test")); // raw email never in the result
 await assert.rejects(checkAccount("secret-bad-input"), (e) => !e.message.includes("secret"));
 
+// Demo city: offline, real breach history, all three building states
+const city = await checkAccount("city@demo.test");
+assert.equal(city.status, "breached");
+assert.equal(city.accounts.length, 20);
+const states = city.accounts.map((a) => (a.breached ? "mine" : a.serviceBreaches.length ? "service" : "ok"));
+assert.ok(states.includes("mine") && states.includes("service") && states.includes("ok"));
+assert.equal(city.accounts.find((a) => a.domain === "adobe.com").serviceBreaches[0].date, "2013-10-01");
+
 // Inbox sender parsing: one account per service, earliest date, people skipped
 assert.deepEqual(sendersToAccounts([
   { from: "Netflix <info@mailer.netflix.com>", date: "2021-05-01" },
@@ -148,6 +156,14 @@ if (process.env.LIVE || process.argv.includes("--live")) {
 
   const { checkXon } = await import("./sources.js");
   assert.equal((await checkXon("zq7x9k2m4breachcity@example.com")).status, "clear");
+  // Cached: the repeat check makes no request (no "xon" log line) and returns the same answer
+  const logged = [];
+  const realLog = console.log;
+  console.log = (...a) => logged.push(a.join(" "));
+  const again = await checkXon("zq7x9k2m4breachcity@example.com");
+  console.log = realLog;
+  assert.equal(again.status, "clear");
+  assert.ok(!logged.some((l) => l.startsWith("xon")));
 }
 
 assert.equal((await post("/api/logout", {}, { cookie: session })).status, 200);
