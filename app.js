@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellX, cellZ, isOnLand, landCells, bridgeSpans, widenedShore } from './city-layout.js';
+import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellX, cellZ, isOnLand, landCells, islands, bridges, bridgeSpans, widenedShore } from './city-layout.js';
 import { scatterSlotOrder, freshPlacementSeed, seededRandom as placementRandomGenerator } from './city-scatter.js';
 import { checkAccount, checkSignedIn } from './checker/checker.js';
 import { buildMissions, readProgress, saveProgress, serviceUrl } from './mission-board.js';
@@ -1830,14 +1830,6 @@ function showMissionBoard({ focus = true } = {}) {
 
 // Fixed landmarks report on the whole ward.
 const landmarkBlock = (name) => blocks[landmarks.find((landmark) => landmark.name === name)?.block ?? 0];
-function readMissionProgress() {
-  const scope = currentCheck?.id || 'sample-city';
-  let storage;
-  try { storage = window.localStorage; } catch { /* Private mode keeps progress in memory. */ }
-  const progress = missionSession.get(scope) || readProgress(storage, scope);
-  missionSession.set(scope, progress);
-  return progress;
-}
 const landmarkReports = {
   gcpd: () => showMissionBoard(),
   // Gotham Bank: every account, by when it was opened.
@@ -1875,20 +1867,32 @@ const landmarkReports = {
       mood: 'normal',
     });
   },
-  // Blackgate Penitentiary: self-reported completed security actions.
+  // Blackgate Penitentiary: its actual road and water approaches on South Hinkley.
   blackgate: () => {
-    const progress = readMissionProgress();
-    const completed = buildMissions(accounts).filter((task) => progress[task.key]);
+    const cellAt = new Map(landCells.map((cell) => [`${cell.row},${cell.col}`, cell]));
+    const access = bridgeSpans.flatMap(([[r1, c1], [r2, c2], style]) => {
+      const a = cellAt.get(`${r1},${c1}`), b = cellAt.get(`${r2},${c2}`);
+      const island = [a, b].find((cell) => cell?.island === 'South Hinkley');
+      if (!island) return [];
+      const mainland = island === a ? b : a;
+      return [[`${mainland.district} bridge`, `${mainland.island} ↔ South Hinkley · ${style} span`, 'ROAD ACCESS', 'clear']];
+    });
+    const localCraft = SHIPS.filter((ship) => ship.file.includes('blackgate'));
+    const craftRows = localCraft.map((ship) => [
+      ship.file.replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()),
+      `Blackgate cove · ${ship.mode === 'moored' ? 'moored' : 'drifting'}`,
+      'WATERCRAFT', 'unknown',
+    ]);
     openPhone({
-      eyebrow: 'BLACKGATE · FIX HISTORY',
-      title: 'Completed actions',
-      subtitle: 'Security steps you marked complete on the mission board',
-      cards: [['ACTIONS COMPLETED', completed.length, 'clear']],
-      listTitle: 'COMPLETED',
-      rows: completed.map((task) => [task.account, task.title, 'DONE', 'clear']),
-      note: completed.length ? 'Completion is self-reported and saved in this browser. Reopen a task from GCPD if you need to review it.' : 'No actions marked complete yet. GCPD Headquarters has your prioritized security checklist.',
+      eyebrow: 'BLACKGATE · ISLAND ACCESS',
+      title: 'South Hinkley approaches',
+      subtitle: 'Road and cove access shown in the authored city map',
+      cards: [['ROAD APPROACHES', access.length, 'clear'], ['LOCAL CRAFT', localCraft.length, 'total']],
+      listTitle: 'ACCESS POINTS',
+      rows: [...access, ...craftRows],
+      note: 'The map has one bridge approach to South Hinkley. The listed skiff and rowboat are scene placements, not live port tracking.',
       focus: landmarkBlock('Blackgate Penitentiary'),
-      mood: completed.length ? 'happy' : 'normal',
+      mood: 'normal',
     });
   },
   // Elliot Memorial: unknown accounts plus an easy route to run the check again.
@@ -1914,31 +1918,33 @@ const landmarkReports = {
       document.querySelector('#city-stats-note').after(retry);
     }
   },
-  wayne: () => openPhone({
-    eyebrow: 'WAYNE TOWER · ACCOUNT MONITOR',
-    title: 'Account overview',
-    subtitle: 'Every website checked for this email',
-    cards: [['ACCOUNTS MONITORED', accounts.length, 'total'], ...['clear', 'breached', 'unknown'].map((status) => [statusLabel[status], countStatuses(accounts)[status], status])],
-    counts: countStatuses(accounts),
-    listTitle: 'ACCOUNT STATUS',
-    rows: accounts.map((account) => [account.name, account.district, accountBadge(account), account.status]),
-    note: 'No match means no known match in this sample source.',
-    focus: blocks[0],
-    mood: 'normal', // Wayne Tower is home base: calm whatever the city's state
-  }),
+  wayne: () => {
+    const districtCount = new Map(islands.map((region) => [region.name, new Set(blocks.filter((block) => block.island === region.name).map((block) => block.district)).size]));
+    openPhone({
+      eyebrow: 'WAYNE TOWER · CITY PLANNING',
+      title: 'Gotham city atlas',
+      subtitle: 'A census of the map layout, independent of account checks',
+      cards: [['NEIGHBORHOODS', new Set(blocks.map((block) => block.district)).size, 'total'], ['LAND CELLS', landCells.length, 'clear'], ['BRIDGES', bridges.length, 'unknown']],
+      listTitle: 'REGIONS',
+      rows: islands.map((region) => [region.name, `${region.cells.length} map cells · ${districtCount.get(region.name) || 0} named districts`, 'MAP', 'clear']),
+      note: 'Counts are computed from Gotham’s authored map plan. A map cell is a layout unit, not a resident or population estimate.',
+      focus: landmarkBlock('Wayne Tower'),
+      mood: 'normal',
+    });
+  },
   arkham: () => {
     openPhone({
-      eyebrow: 'ARKHAM ASYLUM · PASSWORD SAFETY',
-      title: 'Check for password reuse',
-      subtitle: 'A practical review guide for accounts with breach exposure',
-      cards: [['PASSWORDS COLLECTED', '0', 'clear'], ['REVIEW STEPS', 3, 'total']],
-      listTitle: 'YOUR CHECKLIST',
+      eyebrow: 'ARKHAM ASYLUM · BREACH READING ROOM',
+      title: 'What a breach match means',
+      subtitle: 'How to interpret a result before deciding what to do',
+      cards: [['PASSWORDS STORED', 'NONE', 'clear'], ['INTERPRETATION NOTES', 3, 'total']],
+      listTitle: 'READ THE RESULT',
       rows: [
-        ['Start with breached accounts', 'Review each exposed service, starting with recent breaches.', 'STEP 01', 'breached'],
-        ['Use a unique password', 'If you reused that password elsewhere, change those accounts too.', 'STEP 02', 'unknown'],
-        ['Store it in a password manager', 'Generate and save a different strong password for each service.', 'STEP 03', 'clear'],
+        ['A match links an email to a source', 'It does not prove the account is still active or currently accessible.', 'MEANING', 'breached'],
+        ['A match does not reveal your current password', 'This app does not collect, test, or store account passwords.', 'PRIVACY', 'clear'],
+        ['No match is limited to the source checked', 'It cannot guarantee an address or service has never been exposed.', 'LIMIT', 'unknown'],
       ],
-      note: 'Breach City never collects passwords and cannot detect reuse. This checklist is guidance for you to review privately.',
+      note: 'These notes explain the limits of breach lookups; they are not a second account or breach list.',
       focus: blocks[landmarks.find(l => l.name === 'Arkham Asylum').block],
       mood: 'normal',
     });
