@@ -183,10 +183,10 @@ export function createCity(scene) {
 }
 
 export function landmarkLabel(name) {
-  const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 64;
-  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#1b252dee'; ctx.fillRect(0, 0, 512, 64);
-  ctx.fillStyle = '#eee6ce'; ctx.font = '24px monospace'; ctx.textAlign = 'center'; ctx.fillText(name, 256, 41);
+  const canvas = document.createElement('canvas'); canvas.width = 768; canvas.height = 112;
+  const ctx = canvas.getContext('2d'); ctx.fillStyle = '#1b252dee'; ctx.fillRect(0, 0, 768, 112);
+  ctx.fillStyle = '#fff4d8'; ctx.font = 'bold 40px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(name, 384, 56, 736);
   const texture = new THREE.CanvasTexture(canvas);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false }));
-  sprite.scale.set(6, 0.75, 1); return sprite;
+  sprite.scale.set(9, 1.3, 1); return sprite;
 }
