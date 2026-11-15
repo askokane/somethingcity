@@ -2941,8 +2941,7 @@ const landmarkReports = {
       mood: 'normal',
     });
   },
-  // Cobblepot Manor: breach news from the checker, or its offline sample. The news is Have I Been Pwned's breach
-  // catalog, so each headline opens that breach's HIBP page.
+  // Cobblepot Manor: breach news from the checker, or its offline sample. Link headlines to the affected service.
   cobblepot: async () => {
     let news = null;
     try { news = await (await fetch(`${CHECKER_API}/api/news?limit=8`)).json(); }
@@ -2954,8 +2953,8 @@ const landmarkReports = {
       subtitle: news?.source ?? 'Breach news unavailable',
       cards: [['NEW BREACHES', recent.length, recent.length ? 'breached' : 'total'], ['THIS YEAR', news?.thisYear?.breaches ?? '—', 'total']],
       listTitle: 'RECENT',
-      rows: recent.map((item) => [item.name, `${item.date} · ${Number(item.records || 0).toLocaleString()} records · ${item.industry || 'industry unknown'}`, 'NEWS', 'unknown', `https://haveibeenpwned.com/Breach/${encodeURIComponent(item.name)}`]),
-      note: 'News about any service, not only yours. Tap a headline for the full story.',
+      rows: recent.map((item) => [item.name, `${item.date} · ${Number(item.records || 0).toLocaleString()} records · ${item.industry || 'industry unknown'}`, 'NEWS', 'unknown', serviceUrl(item.domain)]),
+      note: 'News about any service, not only yours. Open a headline to visit the service and find its account security settings.',
       focus: landmarkBlock('Cobblepot Manor'),
       mood: 'normal',
     });
