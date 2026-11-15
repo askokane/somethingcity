@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellX, cellZ, cellPos, cornerPos, isOnLand, landCells, islands, bridges, bridgeSpans, widenedShore, deckEdges, shoreSidewalks } from './city-layout.js';
+import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellX, cellZ, cellPos, cornerPos, isOnLand, landCells, islands, bridges, bridgeSpans, widenedShore, deckEdges, shoreSidewalks, sandShore, onSandShore } from './city-layout.js';
 import { scatterSlotOrder, freshPlacementSeed, seededRandom as placementRandomGenerator } from './city-scatter.js';
 import { checkAccount, checkSignedIn } from './checker/checker.js';
 import { buildMissions, readProgress, saveProgress, serviceUrl } from './mission-board.js';
@@ -73,6 +75,11 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.18;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// The moon never moves and moving things (cars, ships, Batman, villains) cast no shadow, so the shadow map is redrawn
+// every SHADOW_REFRESH frames instead of every frame; new or swapped buildings pick up their shadows within ~2 s.
+renderer.shadowMap.autoUpdate = false;
+const SHADOW_REFRESH = 120;
+let shadowFrame = 0;
 renderer.domElement.setAttribute('aria-label', 'Interactive isometric 3D view of Gotham Central Ward');
 sceneHost.append(renderer.domElement);
 
@@ -109,7 +116,7 @@ scene.add(warmRim);
 const loader = new GLTFLoader();
 const environmentLoader = new GLTFLoader();
 function loadModel(path) {
-  return new Promise((resolve, reject) => loader.load(path, (gltf) => resolve(gltf.scene), undefined, reject));
+  return new Promise((resolve, reject) => loader.load(path, (gltf) => { gltf.scene.userData.clips = gltf.animations; resolve(gltf.scene); }, undefined, reject));
 }
 
 const propAxisCorrection = new Map([
@@ -177,6 +184,35 @@ function instanceModel(source, scale, placements, group) {
     made.push(instanced);
   });
   return made;
+}
+
+// Already placed copies (any scale or rotation) collapsed into one InstancedMesh per shared geometry and material, so a
+// park's dozens of walls, posts, bushes and trees cost a few draw calls. One-off meshes are kept as they are.
+function batchPlaced(roots) {
+  const groups = new Map(), kept = [];
+  roots.forEach((root) => {
+    root.updateMatrixWorld(true);
+    const meshes = [];
+    root.traverse((node) => { if (node.isMesh && !node.isInstancedMesh) meshes.push(node); });
+    if (!meshes.length) { kept.push(root); return; }
+    meshes.forEach((mesh) => {
+      const key = `${mesh.geometry.uuid}/${mesh.material.uuid}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(mesh);
+    });
+  });
+  const made = [];
+  groups.forEach((meshes) => {
+    const instanced = new THREE.InstancedMesh(meshes[0].geometry, meshes[0].material, meshes.length);
+    meshes.forEach((mesh, i) => instanced.setMatrixAt(i, mesh.matrixWorld));
+    instanced.castShadow = meshes[0].castShadow;
+    instanced.receiveShadow = meshes[0].receiveShadow;
+    instanced.computeBoundingSphere();
+    scene.add(instanced);
+    made.push(instanced);
+  });
+  roots.forEach((root) => { if (!kept.includes(root)) root.parent?.remove(root); });
+  return [...kept, ...made];
 }
 
 function removeProceduralParkTrees(environment) {
@@ -378,7 +414,7 @@ function addPark(cx, cz, half, { seed = 1, lawn = true, paths = false, trees = 2
     const [model, height] = [[parkKit.compact, between(0.45, 1.3)], [parkKit.hedge, between(0.6, 1.3)], [parkKit.tall, between(1.1, 2.4)]][Math.floor(random() * 3)];
     place(model, height, 0.2, 0.22);
   }
-  return roots;
+  return batchPlaced(roots);
 }
 
 // Every account plot without a website building is a park: a block with all four plots free becomes one bigger park
@@ -398,7 +434,7 @@ let favelaGroup = null;
 function syncPlotParks() {
   // Atharva's createCity draws a lawn square on every empty plot; filler buildings take those plots now.
   city.sync(new Map(slots.map((_, i) => [i, true])));
-  plotParkRoots.splice(0).forEach((root) => root.parent?.remove(root));
+  plotParkRoots.splice(0).forEach((root) => { root.parent?.remove(root); if (root.isInstancedMesh) root.dispose(); });
   if (favelaGroup) { favelaGroup.traverse((node) => node.isInstancedMesh && node.dispose()); scene.remove(favelaGroup); }
   favelaGroup = new THREE.Group();
   favelaGroup.name = 'Filler buildings';
@@ -451,20 +487,13 @@ async function addCityProps(environment) {
     placements.filter(([x, z]) => !onRiver(x, z)).forEach(([x, z, rotation = 0]) => addPlacedModel(source, [x, groundY, z], scaleForHeight(source, height), rotation));
   };
   const furniture = new THREE.Group();
-  furniture.name = 'Sidewalk benches and trash cans';
+  furniture.name = 'Street furniture';
   scene.add(furniture);
-  const metal = new THREE.MeshStandardMaterial({ color: '#303f42', roughness: .75 });
-  const wood = new THREE.MeshStandardMaterial({ color: '#745640', roughness: .9 });
-  function part(x, y, z, w, h, d, material) {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
-    mesh.position.set(x, y, z); mesh.castShadow = true; mesh.receiveShadow = true; furniture.add(mesh);
-  }
   // Street furniture stands on each block's sidewalk strip (the 0.55 units between the plots and the curb), never in the
-  // road: a lamp per side with its arm over the road, hedges, a bench and bin, hydrants and corner stoplights.
-  // Garden blocks get their park wall instead. Everything repeated is instanced.
-  const hedge = piece(props.gotham_bushes, 'Gotham_Bush_Hedge');
-  const compact = piece(props.gotham_bushes, 'Gotham_Bush_Compact');
-  const lamps = [], hedges = [], bushes = [], hydrants = [], signals = [];
+  // road: a lamp per side with its arm over the road, hydrants and corner stoplights. Sidewalks are otherwise kept clear
+  // (no hedges or benches). Garden blocks get their park wall instead. Everything repeated is instanced.
+  const lamps = [], hydrants = [], signals = [];
+  const offBeach = (list) => list.filter(([x, , z]) => !onSandShore(x, z)); // no street furniture facing a sand beach
   blocks.forEach((b, i) => {
     if (b.format === 'garden' || b.format === 'plaza') return;
     if (b.format === 'avenue') {
@@ -480,17 +509,8 @@ async function addCityProps(environment) {
     const ex = hw - 0.24, ez = hd - 0.24; // sidewalk centerline
     // Lamp arms point at the road: +x side 0, -x side π, +z side -π/2, -z side π/2.
     lamps.push([x + ex, .23, z - hd * 0.45, 0], [x - ex, .23, z + hd * 0.45, Math.PI], [x + hw * 0.45, .23, z + ez, -Math.PI / 2], [x - hw * 0.45, .23, z - ez, Math.PI / 2]);
-    hedges.push([x - hw * 0.2, .23, z + ez, 0], [x + hw * 0.2, .23, z - ez, 0], [x + ex, .23, z + hd * 0.2, Math.PI / 2], [x - ex, .23, z - hd * 0.2, Math.PI / 2]);
-    bushes.push([x + hw * 0.75, .23, z + ez, 0], [x - hw * 0.75, .23, z - ez, 0]);
     if (i % 3 === 0) hydrants.push([x + ex, .23, z + hd * 0.75, 0]);
     if (i % 4 === 0) signals.push([x - ex, .23, z + ez, 0]);
-    if (i % 2 !== 0) return;
-    // Bench and bin on the +z sidewalk.
-    const sz = z + ez;
-    part(x + hw * 0.55, .36 + .23, sz, .3, .45, .3, metal);
-    part(x - hw * 0.55, .32 + .23, sz, 1.1, .1, .34, wood);
-    part(x - hw * 0.55, .52 + .23, sz + .13, 1.1, .34, .07, wood);
-    for (const dx of [-.4, .4]) part(x - hw * 0.55 + dx, .18 + .23, sz, .08, .24, .3, metal);
   });
   // Tai's sidewalk kit: a 0.6-wide ring round every block (corners, then straights stretched to fill each side), curbs
   // facing the road. The kit is 1.5 wide at true scale, wider than the blocks' kerb strip, so it is scaled to 0.4.
@@ -530,12 +550,19 @@ async function addCityProps(environment) {
     // extension's rock base, so they are stretched a little taller to meet the pavement level.
     const SHORE_S = 0.8 / 1.5, SHORE_LENGTH = 3 * SHORE_S, TALL = (0.23 - 0.02) / 0.16;
     const shoreStraights = new Map();
+    // Bridge roads cross the shore street onto the deck: no sidewalk piece where one passes, or cars drive over it.
+    const bridgeRoads = [...roadGraph.values()].flatMap((n) => (n.key.startsWith('b') ? [...n.links.keys()].map((key) => [n, roadGraph.get(key)]) : []));
+    const onBridgeRoad = (x, z, reach) => bridgeRoads.some(([a, b]) => {
+      const dx = b.x - a.x, dz = b.z - a.z, t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz || 1)));
+      return Math.hypot(a.x + dx * t - x, a.z + dz * t - z) < reach;
+    });
     for (const band of shoreSidewalks) {
       const n = Math.max(1, Math.round(band.length / SHORE_LENGTH));
       const key = (band.length / (n * SHORE_LENGTH)).toFixed(3);
       if (!shoreStraights.has(key)) shoreStraights.set(key, []);
       for (let i = 0; i < n; i++) {
         const t = -band.length / 2 + (i + 0.5) * band.length / n;
+        if (onBridgeRoad(band.vertical ? band.x : band.x + t, band.vertical ? band.z + t : band.z, 1.5 + SHORE_LENGTH / 2)) continue;
         shoreStraights.get(key).push(band.vertical
           ? [band.x, 0.02, band.z + t, straightYaw(-band.outward, 0)]
           : [band.x + t, 0.02, band.z, straightYaw(0, -band.outward)]);
@@ -546,15 +573,15 @@ async function addCityProps(environment) {
   // Crosswalks across every street just outside each intersection, where the walking network crosses. The paint's bars
   // run along its local x (the traffic direction for a street along x) and repeat across the street.
   if (props.gotham_crosswalk) instanceModel(props.gotham_crosswalk, [1 / 2.9, 2.9 / 2.52, 1], crossings.map(([x, z, yaw]) => [x, 0.075, z, yaw]), furniture);
-  if (props.gotham_lamppost) instanceModel(props.gotham_lamppost, scaleForHeight(props.gotham_lamppost, 4.5), lamps, furniture);
-  if (hedge) instanceModel(hedge, scaleForHeight(hedge, 0.9), hedges, furniture);
-  if (compact) instanceModel(compact, scaleForHeight(compact, 0.8), bushes, furniture);
-  if (props.gotham_fire_hydrant) instanceModel(props.gotham_fire_hydrant, scaleForHeight(props.gotham_fire_hydrant, 0.8), hydrants, furniture);
-  if (props.gotham_stoplight) instanceModel(props.gotham_stoplight, scaleForHeight(props.gotham_stoplight, 4), signals, furniture);
+  if (props.gotham_lamppost) instanceModel(props.gotham_lamppost, scaleForHeight(props.gotham_lamppost, 4.5), offBeach(lamps), furniture);
+  if (props.gotham_fire_hydrant) instanceModel(props.gotham_fire_hydrant, scaleForHeight(props.gotham_fire_hydrant, 0.8), offBeach(hydrants), furniture);
+  if (props.gotham_stoplight) instanceModel(props.gotham_stoplight, scaleForHeight(props.gotham_stoplight, 4), offBeach(signals), furniture);
   // Daniel's four favela variants fill empty plots (syncPlotParks).
   favelaModels = (await Promise.all(['gotham_favela_8bit', 'gotham_favela_02_8bit', 'gotham_favela_03_8bit', 'gotham_favela_04_8bit']
     .map((name) => loadModel(`./models/buildings/${name}.glb`).catch(() => null)))).filter(Boolean);
   parkKit = {
+    sidewalk: kitStraight,
+    crosswalk: props.gotham_crosswalk,
     wall: piece(props.gotham_park_wall, 'Gotham_Park_Wall_Straight'),
     pillar: piece(props.gotham_park_wall, 'Gotham_Park_Wall_Pillar'),
     compact: piece(props.gotham_bushes, 'Gotham_Bush_Compact'),
@@ -574,60 +601,158 @@ let accountModelsReady = false;
 let loadedBuildingModels = null;
 const landmarkRoots = [];
 
-// Bristol Heights: a suburb of Daniel's 8-bit suburban houses on cul-de-sacs. A spine road runs north-south down the
-// block; cul-de-sacs branch east and west and end in turning circles. Two houses line each side of every stub and one
-// closes the end of the bulb, all facing the road and kept inside the block; a connector road meets the river bridge.
-// Lawns and yard trees. Not clickable.
-const HOUSE_SCALE = 0.3; // ~3 x 2.7 units, ~2.6 units tall: under true road scale so each house keeps a yard
+// Bristol Heights: a suburb of Daniel's 8-bit suburban houses on a straight grid. A spine road (city asphalt, lane
+// dashes) runs north-south down the block; four straight streets cross it from edge to edge (the top one carries on to
+// the river bridge). Tai's sidewalk kit lines both sides of every street, with kit crosswalks at the junctions. Houses
+// line both sides of each street, facing it, and a row faces the street along the south end. The middle of the
+// neighbourhood is a walled park either side of the spine (the city parks' builder: winding paths, mixed trees,
+// bushes, lawn patches); gravel footpaths run between the back gardens and wind through the south green. Not clickable.
+const HOUSE_SCALE = 0.25; // 2.47 x 2.23 units, ~2.2 tall
+const HOUSE_HALF = [1.24, 1.12]; // half width (along the road), half depth
 async function buildSuburbs() {
   const house = await loadModel('./models/buildings/suburban_house_8bit.glb').catch(() => loadedBuildingModels?.towers?.[0]);
   const group = new THREE.Group();
   group.name = 'Bristol Heights suburb';
   scene.add(group);
-  const asphalt = new THREE.MeshStandardMaterial({ color: '#2a2f35', roughness: 0.95 });
-  const kerb = new THREE.MeshStandardMaterial({ color: '#8f8a7a', roughness: 0.9 });
-  const road = (x, z, w, d) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, d), asphalt);
-    mesh.position.set(x, 0.255, z);
-    mesh.receiveShadow = true;
-    group.add(mesh);
+  const asphalt = new THREE.MeshStandardMaterial({ color: '#252d35', roughness: 0.88 });
+  const paint = new THREE.MeshStandardMaterial({ color: '#b1a383', roughness: 0.88 });
+  const gravel = new THREE.MeshStandardMaterial({ color: '#9c9581', roughness: 1 });
+  const box = new THREE.BoxGeometry(1, 1, 1);
+  const flat = (material, x, y, z, w, h, d) => {
+    const mesh = new THREE.Mesh(box, material);
+    mesh.position.set(x, y, z); mesh.scale.set(w, h, d);
+    mesh.receiveShadow = true; group.add(mesh); return mesh;
   };
-  const circle = (x, z, radius) => {
-    const ring = new THREE.Mesh(new THREE.CylinderGeometry(radius + 0.2, radius + 0.2, 0.04, 24), kerb);
-    ring.position.set(x, 0.25, z);
-    const bulb = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 0.05, 24), asphalt);
-    bulb.position.set(x, 0.26, z);
-    const island = new THREE.Mesh(new THREE.CylinderGeometry(radius * 0.35, radius * 0.35, 0.08, 16), new THREE.MeshStandardMaterial({ color: '#3f6a45' }));
-    island.position.set(x, 0.29, z);
-    [ring, bulb, island].forEach((mesh) => { mesh.receiveShadow = true; group.add(mesh); });
+  const ROAD_TOP = 0.28, SIDEWALK = 0.6;
+  const road = (x, z, w, d) => flat(asphalt, x, ROAD_TOP - 0.025, z, w, 0.05, d);
+  // Sidewalk kit runs, grouped by stretch so each length is one instanced mesh. (nx, nz) points at the road (the curb).
+  const runs = new Map();
+  const straightYaw = (nx, nz) => Math.atan2(nz, -nx);
+  const sidewalk = (x1, z1, x2, z2, nx, nz) => {
+    const length = Math.hypot(x2 - x1, z2 - z1);
+    if (length < 0.3) return;
+    const n = Math.max(1, Math.round(length / 1.2));
+    const key = (length / n / 1.2).toFixed(3);
+    if (!runs.has(key)) runs.set(key, []);
+    for (let i = 0; i < n; i++) {
+      const t = (i + 0.5) / n;
+      runs.get(key).push([x1 + (x2 - x1) * t, 0.24, z1 + (z2 - z1) * t, straightYaw(nx, nz)]);
+    }
   };
-  const homes = [];
-  const yards = [];
-  const facing = (fx, fz) => Math.atan2(fx, fz); // the house's front is +Z
+  const crossings = []; // [x, z, yaw, street width]
+  const homes = [], fronts = [];
+  const home = (x, z, fx, fz) => { homes.push([x, 0.23, z, Math.atan2(fx, fz)]); fronts.push([x, z, fx, fz]); };
+  const paths = []; // gravel footpath polylines [[x, z], ...]
+  const greens = []; // [x1, z1, x2, z2] strips for trees and shrubs
+  const parkRoots = []; // the neighbourhood park's pieces
   for (const b of blocks.filter((block) => block.format === 'suburb')) {
-    const random = seededRandom(9001 + Math.round(b.x * 7 + b.z));
-    const top = b.z - b.depth / 2;
-    const bulbX = b.width / 2 - 6; // turning circle centre, from the spine
-    road(b.x, b.z, 2, b.depth - 0.4); // spine
-    road(b.x + b.width / 4 + 0.5, cellZ(7), b.width / 2 - 1, 2); // connector to the river bridge (row 7)
-    for (let z = top + 11; z < top + b.depth - 6; z += 11) {
-      for (const side of [-1, 1]) {
-        road(b.x + side * (1 + (bulbX - 1) / 2), z, bulbX - 1, 1.6);
-        circle(b.x + side * bulbX, z, 1.8);
-        for (const along of [3.4, 7.2]) for (const across of [-1, 1]) homes.push([b.x + side * along, 0.23, z + across * 2.7, facing(0, -across)]);
-        homes.push([b.x + side * (bulbX + 3.6), 0.23, z, facing(-side, 0)]); // closing the bulb
-        // Yard trees in the bulb's corners.
-        for (const across of [-1, 1]) if (random() > 0.3) yards.push([b.x + side * (bulbX + 1.2), z + across * 3.6]);
+    const top = b.z - b.depth / 2, bottom = b.z + b.depth / 2, half = b.width / 2;
+    const inner = half - SIDEWALK; // inside the block's own sidewalk ring
+    const SPINE = 1.5, STUB = 1, ROW = 9.6;
+    const across = STUB + SIDEWALK + 0.6 + HOUSE_HALF[1]; // house centre from its cul-de-sac's centreline
+    const rows = [0, 1, 3, 4].map((k) => top + 4.5 + k * ROW); // row 0 lines up with the river bridge (cellZ(7)); row 2 is the park
+    // Spine: full depth, meeting the streets at both ends, with lane dashes; sidewalks both sides, open at each mouth.
+    road(b.x, b.z, SPINE * 2, b.depth);
+    for (let z = top + 1.5; z < bottom - 1; z += 3) flat(paint, b.x, ROAD_TOP + 0.004, z, 0.06, 0.01, 1.2);
+    for (const side of [-1, 1]) {
+      let from = top + SIDEWALK;
+      for (const [a, c] of [...rows.map((z) => [z - STUB, z + STUB]), [bottom - SIDEWALK, bottom]]) {
+        sidewalk(b.x + side * (SPINE + SIDEWALK / 2), from, b.x + side * (SPINE + SIDEWALK / 2), a, -side, 0);
+        from = c;
       }
     }
-    for (let i = 0; i < 6; i++) yards.push([b.x + (random() - 0.5) * (b.width - 3), top + 2 + random() * 4]);
+    rows.forEach((z, k) => {
+      // A straight street from edge to edge across the spine, lane dashes down the middle, sidewalks both sides.
+      road(b.x, z, b.width, STUB * 2);
+      for (const side of [-1, 1]) {
+        for (let x = SPINE + 1.5; x < half - 1; x += 3) flat(paint, b.x + side * x, ROAD_TOP + 0.004, z, 1.2, 0.01, 0.06);
+        crossings.push([b.x + side * (SPINE + SIDEWALK / 2), z, 0, STUB * 2]);
+        for (const s of k === 0 ? [1] : [-1, 1]) {
+          sidewalk(b.x + side * (SPINE + SIDEWALK), z + s * (STUB + SIDEWALK / 2), b.x + side * inner, z + s * (STUB + SIDEWALK / 2), 0, -s);
+          // Five houses a side, facing the street (row 0 only on its south side: the block's edge is too close).
+          for (const along of [3.6, 6.3, 9, 11.7, 14.4]) home(b.x + side * along, z + s * across, 0, -s);
+        }
+        if (k === 0) sidewalk(b.x + side * (SPINE + SIDEWALK), z - STUB - SIDEWALK / 2, b.x + side * inner, z - STUB - SIDEWALK / 2, 0, 1);
+      }
+      // A footpath between back gardens, where the next row isn't across the park.
+      const next = rows[k + 1];
+      if (next && next - z < ROW * 1.5) {
+        for (const side of [-1, 1]) paths.push([[b.x + side * (SPINE + SIDEWALK), (z + next) / 2], [b.x + side * inner, (z + next) / 2]]);
+        crossings.push([b.x, (z + next) / 2, Math.PI / 2, SPINE * 2]);
+      }
+    });
+    // The neighbourhood park: between row 1's and row 3's back gardens, either side of the spine.
+    const parkTop = rows[1] + across + HOUSE_HALF[1] + 0.3, parkBottom = rows[2] - across - HOUSE_HALF[1] - 0.3;
+    for (const side of [-1, 1]) {
+      const x1 = SPINE + SIDEWALK + 0.2, x2 = inner;
+      parkRoots.push(...addPark(b.x + side * (x1 + x2) / 2, (parkTop + parkBottom) / 2, [(x2 - x1) / 2, (parkBottom - parkTop) / 2], {
+        seed: 9100 + (side > 0 ? 1 : 0), lawn: true, paths: true, trees: 9, bigTrees: 2, bushes: 22, patches: 7,
+      }));
+    }
+    // The south end: a row of houses facing the street, behind a green with a winding footpath.
+    const southZ = bottom - SIDEWALK - 0.5 - HOUSE_HALF[1];
+    for (const side of [-1, 1]) for (const along of [3.6, 6.3, 9, 11.7, 14.4]) home(b.x + side * along, southZ, 0, 1);
+    const greenTop = rows.at(-1) + across + HOUSE_HALF[1] + 0.2, greenBottom = southZ - HOUSE_HALF[1] - 0.2;
+    const mid = (greenTop + greenBottom) / 2, sway = (greenBottom - greenTop) * 0.28;
+    for (const side of [-1, 1]) {
+      const xs = [SPINE + SIDEWALK, 5.5, 9.5, 13, inner];
+      paths.push(xs.map((x, i) => [b.x + side * x, mid + (i > 0 && i < xs.length - 1 ? (i % 2 ? sway : -sway) : 0)]));
+      greens.push([b.x + side * (SPINE + SIDEWALK + 0.6), greenTop, b.x + side * (inner - 0.4), greenBottom]);
+    }
+    crossings.push([b.x, mid, Math.PI / 2, SPINE * 2]);
+    // North of row 0, between the block's edge and the first cul-de-sacs' sidewalks: a planted verge.
+    for (const side of [-1, 1]) greens.push([b.x + side * (SPINE + SIDEWALK + 0.4), top + SIDEWALK + 0.2, b.x + side * (inner - 0.4), rows[0] - STUB - SIDEWALK - 0.2]);
   }
+  if (parkKit?.sidewalk) for (const [stretch, list] of runs) instanceModel(parkKit.sidewalk, [0.4, 0.4 * Number(stretch), 1], list, group);
+  if (parkKit?.crosswalk) for (const [x, z, yaw, width] of crossings) instanceModel(parkKit.crosswalk, [1 / 2.9, (width - 0.1) / 2.52, 1], [[x, ROAD_TOP + 0.005, z, yaw]], group);
   if (house) {
     instanceModel(house, HOUSE_SCALE, homes, group);
     flickerWindows(group);
   }
-  const tree = parkKit?.streetTree;
-  if (tree) yards.forEach(([x, z], i) => group.add(addPlacedModel(tree, [x, 0.23, z], scaleForHeight(tree, 3 + (i % 5) * 0.8), i)));
+  // Gravel footpaths like the parks': short segments with turned-square joints, the bends smoothed.
+  const segments = [], joints = [];
+  for (const line of paths) {
+    const curve = new THREE.CatmullRomCurve3(line.map(([x, z]) => new THREE.Vector3(x, 0, z)));
+    const points = curve.getSpacedPoints(Math.max(4, Math.ceil(curve.getLength() / 0.5)));
+    joints.push(...points);
+    for (let i = 0; i < points.length - 1; i++) segments.push([points[i], points[i + 1]]);
+  }
+  const gravelPieces = new THREE.InstancedMesh(box, gravel, segments.length + joints.length);
+  const matrix = new THREE.Matrix4(), turn = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+  let n = 0;
+  for (const [p, q] of segments) {
+    turn.setFromAxisAngle(up, -Math.atan2(q.z - p.z, q.x - p.x));
+    gravelPieces.setMatrixAt(n++, matrix.compose(new THREE.Vector3((p.x + q.x) / 2, 0.255, (p.z + q.z) / 2), turn, new THREE.Vector3(p.distanceTo(q) + 0.05, 0.03, 0.5)));
+  }
+  turn.setFromAxisAngle(up, Math.PI / 4);
+  for (const p of joints) gravelPieces.setMatrixAt(n++, matrix.compose(new THREE.Vector3(p.x, 0.254, p.z), turn, new THREE.Vector3(0.36, 0.03, 0.36)));
+  gravelPieces.receiveShadow = true;
+  gravelPieces.computeBoundingSphere();
+  group.add(gravelPieces);
+  // Planting: bushes either side of each front door, a tree on each turning-circle island, trees and shrubs along the
+  // greens (off the footpaths). Seeded, so it looks the same on every load.
+  if (!parkKit) return;
+  const random = seededRandom(9001);
+  const between = (low, high) => low + random() * (high - low);
+  const planted = [];
+  const plant = (model, x, z, height) => { if (model) planted.push(addPlacedModel(model, [x, 0.23, z], scaleForHeight(model, height), between(0, Math.PI * 2))); };
+  for (const [x, z, fx, fz] of fronts) {
+    const doorstep = HOUSE_HALF[1] + 0.3;
+    for (const s of [-1, 1]) plant(parkKit.compact, x + fx * doorstep + fz * s * 0.85, z + fz * doorstep + fx * s * 0.85, between(0.45, 0.65));
+  }
+  const onPath = (x, z) => joints.some((p) => Math.hypot(p.x - x, p.z - z) < 0.7);
+  for (const [x1, z1, x2, z2] of greens) {
+    const depth = Math.abs(z2 - z1);
+    for (let x = Math.min(x1, x2) + 0.6; x < Math.max(x1, x2) - 0.3; x += depth > 2.5 ? 0.55 : 1.1) { // denser on the wide greens
+      const z = Math.min(z1, z2) + 0.3 + random() * Math.max(0, depth - 0.6);
+      if (onPath(x, z)) continue;
+      const pick = random();
+      if (pick < 0.12 && depth > 4) plant(parkKit.largeTree, x, z, between(4, 5.5));
+      else if (pick < 0.4 && depth > 2.5) plant(parkKit.streetTree, x, z, between(2.4, 3.6));
+      else plant([parkKit.compact, parkKit.hedge, parkKit.tall][Math.floor(random() * 3)], x, z, between(0.5, 1.2));
+    }
+  }
+  batchPlaced(planted);
 }
 
 // Atharva's harbor fleet (models/ships: keel at y 0, bow along +X, city units). Each vessel rides the actual wave under
@@ -639,9 +764,9 @@ const SHIPS = [
   { file: 'gcpd_harbor_patrol', mode: 'loop', centre: [-18, -6], radius: [160, 160], speed: 5 }, // clears every corner of the map
   { file: 'tugboat_east_quay', mode: 'loop', centre: [108, 0], radius: [8, 16], speed: 2.2 }, // clear of the cargo lane
   // Cargo barge between the two ports: Haysville Docks' berth (east shore), out to sea, south of South Hinkley (no
-  // bridges to pass under), up the channel east of Bristol to West Harlow Docks' berth (west shore). Each berth is under
-  // the port's crane, inside its breakwater. Corners are rounded into arcs.
-  { file: 'cargo_barge_gotham_river', mode: 'route', points: [[88.8, 52], [104, 52], [104, 117], [-80, 117], [-80, 52], [-64.8, 52]], speed: 2.4 },
+  // bridges to pass under), up the channel east of Bristol to West Harlow Docks' berth (west shore). Each berth is off
+  // the crane block's quay, bow-in under the crane's boom, with the breakwater to the south. Corners are rounded into arcs.
+  { file: 'cargo_barge_gotham_river', mode: 'route', points: [[100.5, 50], [108, 50], [108, 117], [-85, 117], [-85, 60], [-76.5, 60]], speed: 2.4 },
   { file: 'bristol_midtown_ferry', mode: 'shuttle', from: [-84, 12], to: [-36, 12], speed: 2.4 }, // lower inlet, west of the bridge
   { file: 'cargo_barge_gotham_river', mode: 'shuttle', from: [-76, -104], to: [-76, -40], speed: 1.4 }, // Gotham River, north of the bridges
   { file: 'fishing_trawler_narrows', mode: 'drift', at: [118, -62], heading: 2.2 },
@@ -776,7 +901,7 @@ async function launchShips() {
     if (spec.at && isOnLand(spec.at[0], spec.at[1], -2.5)) { console.warn(`${spec.file} would sit on land; skipped`); return; }
     model.rotation.order = 'YXZ';
     model.scale.setScalar(spec.scale ?? 1);
-    model.traverse((node) => { if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
+    model.traverse((node) => { if (node.isMesh) { node.castShadow = false; node.receiveShadow = true; } }); // moving: no shadow (static shadow map)
     group.add(model);
     const length = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).x;
     let curve = null;
@@ -955,9 +1080,9 @@ const roadGraph = (() => {
   const rows = Math.max(...landCells.map((c) => c.row)) + 2;
   const cols = Math.max(...landCells.map((c) => c.col)) + 2;
   for (let i = 0; i <= rows; i++) for (let j = 0; j <= cols; j++) {
-    if (j < cols && street(`${i - 1},${j}`, `${i},${j}`)) link(corner(i, j), corner(i, j + 1)); // along a row boundary
-    // Along a column boundary (none on a port's deck, which runs to the quay).
-    if (i < rows && street(`${i},${j - 1}`, `${i},${j}`) && !deckEdges.has(`${cornerPos(i, j).x},${cornerPos(i, j).z + 6}`)) link(corner(i, j), corner(i + 1, j));
+    if (j < cols && street(`${i - 1},${j}`, `${i},${j}`) && !sandShore.has(`${cornerPos(i, j).x + 6},${cornerPos(i, j).z}`)) link(corner(i, j), corner(i, j + 1)); // along a row boundary (none on a sand beach)
+    // Along a column boundary (a port's deck is a street too: the quay road).
+    if (i < rows && street(`${i},${j - 1}`, `${i},${j}`) && !sandShore.has(`${cornerPos(i, j).x},${cornerPos(i, j).z + 6}`)) link(corner(i, j), corner(i + 1, j));
   }
   for (const [[r1, c1], [r2, c2]] of bridgeSpans) {
     const [ra, ca, rb, cb] = r1 + c1 <= r2 + c2 ? [r1, c1, r2, c2] : [r2, c2, r1, c1];
@@ -1010,7 +1135,6 @@ function blockyBatman() {
   const add = (w, h, d, x, y, z, color) => {
     const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color, roughness: 0.7 }));
     box.position.set(x, y, z);
-    box.castShadow = true;
     group.add(box);
   };
   const suit = '#8d98ab', dark = '#262b38', gold = '#e0b13c', skin = '#e2b98f';
@@ -1290,7 +1414,7 @@ function updatePedestrians(time) {
 // Tai's civilian cars (hatchback, two sedans) and a few GCPD cruisers drive the street network in the right-hand lane,
 // turning at random at corners (no U-turns unless it's a dead end) and easing their heading round each turn. A car stops
 // for a pedestrian or a car just ahead; after waiting STUCK seconds behind cars (a jam at a crossing) it turns round.
-const CAR_COUNT = 28;
+const CAR_COUNT = 14;
 const COP_COUNT = 4;
 const CAR_SPEED = 3.6;
 const LANE = 0.7; // off the centreline
@@ -1301,33 +1425,99 @@ async function spawnTraffic() {
   const [civilian, police] = await Promise.all([load('gotham_civilian_cars'), load('gotham_police_cruiser')]);
   const models = [...(civilian?.children ?? []).map((car) => [car, 1]), ...(police?.children ?? []).map((car) => [car, 0.55])];
   if (!models.length) return;
+  if (police?.children.length) policeModel = models[models.length - 1];
+  for (let i = 0; i < CAR_COUNT + COP_COUNT; i++) addCar(...(i < CAR_COUNT ? models[i % Math.max(1, models.length - 1)] : models[models.length - 1]), i >= CAR_COUNT);
+  syncIncidents();
+}
+let policeModel = null; // [cruiser, scale], kept so incidents can call in more cops
+const randomEdge = () => {
   const walkable = [...roadGraph.values()].filter((n) => n.links.size);
-  for (let i = 0; i < CAR_COUNT + COP_COUNT; i++) {
-    const [source, scale] = i < CAR_COUNT ? models[i % Math.max(1, models.length - 1)] : models[models.length - 1];
-    const body = source.clone(true);
-    const centre = new THREE.Box3().setFromObject(source).getCenter(new THREE.Vector3());
-    body.position.set(-centre.x, 0, -centre.z); // the kit's cars stand side by side; centre each one
-    const car = new THREE.Group();
-    car.add(body);
-    car.scale.setScalar(scale);
-    // The kit's own beacon lights are wide point lights that tint whole streets purple; the flashing below replaces them.
-    car.traverse((node) => { if (node.isMesh) node.castShadow = true; if (node.isLight) node.visible = false; });
-    // GCPD light bars: unlit red and blue lenses that flash in turn, and a small light washing the street below.
-    let beacons = null;
-    if (i >= CAR_COUNT) {
-      beacons = { red: [], blue: [], light: new THREE.PointLight('#ff2a2a', 0, 9, 1.4) };
-      body.traverse((node) => {
-        const colour = /red_lens/i.test(node.name) ? 'red' : /blue_lens/i.test(node.name) ? 'blue' : null;
-        if (colour) node.traverse((mesh) => { if (mesh.isMesh) { mesh.material = new THREE.MeshBasicMaterial(); beacons[colour].push(mesh.material); } });
-      });
-      beacons.light.position.y = 5; // well above the roof (car frame, before the 0.55 scale) so it lights the street, not the paint
-      car.add(beacons.light);
-    }
-    scene.add(car);
-    const from = walkable[Math.floor(Math.random() * walkable.length)];
-    const to = roadGraph.get([...from.links.keys()][Math.floor(Math.random() * from.links.size)]);
-    cars.push({ car, from, to, t: Math.random(), yaw: null, speed: CAR_SPEED * (0.8 + Math.random() * 0.4), wait: 0, beacons, flash: Math.random() * 2 });
+  const from = walkable[Math.floor(Math.random() * walkable.length)];
+  return { from, to: roadGraph.get([...from.links.keys()][Math.floor(Math.random() * from.links.size)]) };
+};
+function addCar(source, scale, isCop) {
+  const body = source.clone(true);
+  const centre = new THREE.Box3().setFromObject(source).getCenter(new THREE.Vector3());
+  body.position.set(-centre.x, 0, -centre.z); // the kit's cars stand side by side; centre each one
+  const car = new THREE.Group();
+  car.add(body);
+  car.scale.setScalar(scale);
+  // The kit's own beacon lights are wide point lights that tint whole streets purple; the flashing below replaces them.
+  car.traverse((node) => { if (node.isLight) node.visible = false; }); // no shadow: it moves (static shadow map)
+  // GCPD light bars: unlit red and blue lenses that flash in turn, and a small light washing the street below.
+  let beacons = null;
+  if (isCop) {
+    beacons = { red: [], blue: [], light: new THREE.PointLight('#ff2a2a', 0, 9, 1.4) };
+    body.traverse((node) => {
+      const colour = /red_lens/i.test(node.name) ? 'red' : /blue_lens/i.test(node.name) ? 'blue' : null;
+      if (colour) node.traverse((mesh) => { if (mesh.isMesh) { mesh.material = new THREE.MeshBasicMaterial(); beacons[colour].push(mesh.material); } });
+    });
+    beacons.light.position.y = 5; // well above the roof (car frame, before the 0.55 scale) so it lights the street, not the paint
+    car.add(beacons.light);
   }
+  scene.add(car);
+  const entry = { car, ...randomEdge(), t: Math.random(), yaw: null, speed: CAR_SPEED * (0.8 + Math.random() * 0.4), wait: 0, beacons, flash: Math.random() * 2, parked: null };
+  cars.push(entry);
+  return entry;
+}
+
+// ---- Incidents ------------------------------------------------------------------------------------------------------
+// Every breached tower's block is ringed with police sawhorses, and two GCPD cruisers park on its east and south streets
+// (the sides the camera sees). Parked cruisers are taken off patrol; when there are more incidents than cruisers, more
+// are called in. When the breach clears they go back to patrolling.
+const BARRIER_GAP = 1.4;
+// One merged, vertex-coloured sawhorse drawn as a single InstancedMesh for every barrier in the city.
+const barrierGeometry = (() => {
+  const parts = [];
+  const box = (w, h, d, color, x, y, z) => {
+    const g = new THREE.BoxGeometry(w, h, d).translate(x, y, z);
+    const c = new THREE.Color(color);
+    g.setAttribute('color', new THREE.Float32BufferAttribute(Array.from({ length: g.attributes.position.count }, () => [c.r, c.g, c.b]).flat(), 3));
+    parts.push(g);
+  };
+  for (const x of [-0.42, 0.42]) box(0.07, 0.42, 0.22, '#d8d2c4', x, 0.21, 0);
+  for (let i = 0; i < 5; i++) box(0.2, 0.12, 0.05, i % 2 ? '#f2efe6' : '#f26a1b', -0.4 + i * 0.2, 0.36, 0); // striped rail
+  box(0.2, 0.06, 0.06, '#ffcf3a', 0, 0.48, 0); // amber lamp
+  return mergeGeometries(parts);
+})();
+const barrierMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
+const incidentGroup = new THREE.Group();
+scene.add(incidentGroup);
+function syncIncidents() {
+  incidentGroup.children.forEach((mesh) => mesh.dispose());
+  incidentGroup.clear();
+  const barriers = [];
+  const breached = accounts.filter((account) => account.status === 'breached' && account.slot >= 0);
+  const spots = [];
+  for (const blockIndex of new Set(breached.map((account) => slots[account.slot].block))) {
+    const cells = blocks[blockIndex].cells;
+    const minX = Math.min(...cells.map((c) => c.x)) - 4.5, maxX = Math.max(...cells.map((c) => c.x)) + 4.5;
+    const minZ = Math.min(...cells.map((c) => c.z)) - 4.5, maxZ = Math.max(...cells.map((c) => c.z)) + 4.5;
+    const side = (x1, z1, x2, z2, yaw) => {
+      const n = Math.max(1, Math.round(Math.hypot(x2 - x1, z2 - z1) / BARRIER_GAP));
+      for (let i = 0; i <= n; i++) barriers.push(new THREE.Matrix4().makeRotationY(yaw).setPosition(x1 + (x2 - x1) * i / n, ROAD_Y, z1 + (z2 - z1) * i / n));
+    };
+    side(minX, minZ, maxX, minZ, 0); side(minX, maxZ, maxX, maxZ, 0);
+    side(minX, minZ, minX, maxZ, Math.PI / 2); side(maxX, minZ, maxX, maxZ, Math.PI / 2);
+    for (const account of breached.filter((a) => slots[a.slot].block === blockIndex)) {
+      const slot = slots[account.slot];
+      spots.push({ x: maxX + 0.8, z: slot.z, yaw: 0.35 }, { x: slot.x, z: maxZ + 0.8, yaw: Math.PI / 2 + 0.35 });
+    }
+  }
+  if (barriers.length) {
+    const mesh = new THREE.InstancedMesh(barrierGeometry, barrierMaterial, barriers.length);
+    barriers.forEach((matrix, i) => mesh.setMatrixAt(i, matrix));
+    mesh.castShadow = true;
+    incidentGroup.add(mesh);
+  }
+  if (!cars.length) return; // traffic not spawned yet; spawnTraffic calls back in
+  let cops = cars.filter((c) => c.beacons);
+  while (policeModel && cops.length < spots.length) cops.push(addCar(...policeModel, true));
+  cops.forEach((cop, i) => {
+    const spot = spots[i] ?? null;
+    if (!spot && cop.parked) Object.assign(cop, randomEdge(), { t: 0, yaw: null }); // back on patrol
+    cop.parked = spot;
+  });
 }
 let lastCarTime = performance.now() / 1000;
 function updateTraffic(time) {
@@ -1340,7 +1530,9 @@ function updateTraffic(time) {
       c.beacons.blue.forEach((m) => m.color.set(redOn ? '#081040' : '#2f6bff'));
       c.beacons.light.color.set(redOn ? '#ff2a2a' : '#2f6bff');
       c.beacons.light.intensity = 5;
+      c.beacons.light.visible = !c.parked; // each point light costs every pixel; parked ones flash their lenses only
     }
+    if (c.parked) { c.car.position.set(c.parked.x, ROAD_Y, c.parked.z); c.car.rotation.y = c.yaw = c.parked.yaw; continue; }
     let len = Math.hypot(c.to.x - c.from.x, c.to.z - c.from.z) || 1;
     // Anything within reach ahead of the car and close to its line?
     const here = c.car.position, hx = (c.to.x - c.from.x) / len, hz = (c.to.z - c.from.z) / len;
@@ -1370,7 +1562,7 @@ function updateTraffic(time) {
     const mx = (c.from.x + c.to.x) / 2, mz = (c.from.z + c.to.z) / 2;
     const rightLand = isOnLand(mx - dz, mz + dx), leftLand = isOnLand(mx + dz, mz - dx);
     const edgeKey = Math.abs(dx) > 0.5 ? `${Math.round(mx / 12) * 12},${mz}` : `${mx},${Math.round(mz / 12) * 12}`;
-    const lane = bridge || (rightLand && leftLand) || widenedShore.has(edgeKey) ? LANE : rightLand ? 0.75 : -0.75;
+    const lane = bridge || (rightLand && leftLand) || widenedShore.has(edgeKey) || deckEdges.has(edgeKey) ? LANE : rightLand ? 0.75 : -0.75;
     c.car.position.set(c.from.x + dx * len * c.t - dz * lane, bridge ? 0.12 : ROAD_Y, c.from.z + dz * len * c.t + dx * lane);
     const target = Math.atan2(-dx, -dz); // the cars' noses point -Z
     if (c.yaw === null) c.yaw = target;
@@ -1414,7 +1606,9 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
   const models = { generic: gltf.scene, ...Object.fromEntries(variants) };
   // Daniel's ten website towers, 01 (9.8 m) to 10 (45.3 m); one that fails to load falls back to Atharva's styles.
   models.towers = await Promise.all(Array.from({ length: 10 }, (_, i) => loadModel(`./models/account_buildings/account_building_${String(i + 1).padStart(2, '0')}.glb`).catch(() => null)));
-  models.villains = (await Promise.all(VILLAINS.map((name) => loadModel(`./models/npcs/${name}.glb`).catch((error) => { console.warn(`Could not load ${name}:`, error); return null; })))).filter(Boolean);
+  // Each tower's burning ruin (same slot number), swapped in while its site is breached.
+  models.destroyedTowers = await Promise.all(Array.from({ length: 10 }, (_, i) => loadModel(`./models/account_buildings/account_building_${String(i + 1).padStart(2, '0')}_destroyed.glb`).catch(() => null)));
+  models.villains = (await Promise.all(VILLAINS.map((name) => loadModel(`./models/npcs/${name}.glb`).then((model) => { model.userData.villainName = name; return model; }).catch((error) => { console.warn(`Could not load ${name}:`, error); return null; })))).filter(Boolean);
   loadedBuildingModels = models;
   accounts.forEach((account) => {
     if (account.slot < 0) return;
@@ -1437,12 +1631,12 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
     const scale = landmark.file.endsWith('_8bit.glb')
       ? Math.min(UNITS_PER_METER, (block.width - 1.2) / size.x, (block.depth - 1.2) / size.z)
       : landmark.name === 'Wayne Tower'
-        ? landmark.height / size.y // even scale: true proportions, landmark.height tall
+        ? Math.min(landmark.height / size.y, (Math.min(block.width, block.depth) - 1.2) / Math.max(size.x, size.z)) // even scale, fits one block
         : [(block.width - 1.2) / size.x, landmark.height / size.y, (block.depth - 1.2) / size.z];
     const root = addPlacedModel(source, [block.x, 0.23, block.z], scale, faceToward(source, YAW_SOUTH)); // landmarks face south
     flickerWindows(root);
     root.userData.landmark = landmark.name;
-    const label = landmarkLabel(landmark.name); label.position.set(block.x, 0.23 + landmark.height + 0.8, block.z); scene.add(label);
+    const label = landmarkLabel(landmark.name); label.position.set(block.x, new THREE.Box3().setFromObject(root).max.y + 0.8, block.z); scene.add(label);
     landmarkRoots.push(root);
   }
   city.sync(slotOccupants);
@@ -1500,7 +1694,8 @@ const faceToward = (model, want) => want - frontYaw(model);
 const eastOrSouth = (random) => (random() < 0.5 ? YAW_EAST : YAW_SOUTH);
 
 function chooseBuildingModel(account, models) {
-  const tower = models.towers?.[towerVariant(account)];
+  const variant = towerVariant(account);
+  const tower = (account.status === 'breached' && models.destroyedTowers?.[variant]) || models.towers?.[variant];
   if (tower) return tower;
   // Fallback: keep each account's architecture stable across reloads and shuffled placements.
   const styles = ['generic', 'wayne', 'ace', 'arkham'].filter(key => models[key]);
@@ -1527,7 +1722,7 @@ function addAccountBuilding(account, source, scale = 2) {
   const isWayne = source === loadedBuildingModels?.wayne;
   // The updated Wayne asset is twice the original tower's height.
   // Daniel's towers are modeled in meters, so they keep their real height at road scale.
-  const isDanielTower = loadedBuildingModels?.towers?.includes(source);
+  const isDanielTower = loadedBuildingModels?.towers?.includes(source) || loadedBuildingModels?.destroyedTowers?.includes(source);
   const targetHeight = isDanielTower ? raw.y * UNITS_PER_METER : FLOOR * (2 + Math.min(5, Math.floor(age / 3))) * (isWayne ? 2 : 1);
   const footprint = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
   const footprintScale = ACCOUNT_FOOTPRINT / Math.max(footprint.x, footprint.z);
@@ -1544,6 +1739,12 @@ function addAccountBuilding(account, source, scale = 2) {
   model.position.set(-center.x, 0.23 - bounds.min.y, -center.z);
   root.position.set(slot.x, 0, slot.z);
   root.userData.accountId = account.id;
+  root.userData.source = source;
+  if (source.userData.clips?.length) { // the ruins' looping flames
+    const mixer = new THREE.AnimationMixer(model);
+    source.userData.clips.forEach((clip) => mixer.clipAction(clip).play());
+    root.userData.mixer = mixer;
+  }
   root.userData.buildingStyle = Object.entries(loadedBuildingModels ?? {}).find(([, model]) => model === source)?.[0] ?? 'generic';
   root.traverse((node) => { node.userData.accountId = account.id; if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
   scene.add(root);
@@ -1645,19 +1846,24 @@ function addStatusBeacon(root, status, buildingHeight = 6.5) {
 }
 
 // Tai's villain figures (models/npcs). Riddler, Batman and Robin have no GLB export yet.
-const VILLAINS = ['gotham_joker', 'gotham_harley_quinn', 'gotham_penguin', 'gotham_poison_ivy'];
-const VILLAIN_HEIGHT = meters(1.8); // a person on the roof, at road scale
+// gotham_robber_8bit stands on the roof as a gang of three.
+const VILLAINS = ['gotham_joker', 'gotham_harley_quinn', 'gotham_penguin', 'gotham_poison_ivy', 'gotham_robber_8bit'];
+const GANG = 'gotham_robber_8bit';
+const VILLAIN_HEIGHT = meters(4.5); // larger than life, so they read from the city view
 
 function syncRooftopVillain(account, root) {
+  if (root.userData.villain && account.status === 'breached') return; // keep the one already up there
   if (root.userData.villain) { root.remove(root.userData.villain); root.userData.villain = null; }
   const villains = loadedBuildingModels?.villains;
   if (account.status !== 'breached' || !villains?.length) return;
-  const villain = villains[[...(account.name || account.id)].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % villains.length].clone(true);
-  const beacon = root.userData.statusBeacon;
-  if (beacon) root.remove(beacon); // measure the roof, not the beacon floating over it
-  root.updateMatrixWorld(true);
-  const roof = new THREE.Box3().setFromObject(root);
-  if (beacon) root.add(beacon);
+  // Random, and no figure on two roofs at once. Once all are taken, extra roofs get another robber gang.
+  const taken = new Set([...renderedBuildings.values()].map((other) => other.userData.villain?.userData.villainName));
+  const free = villains.filter((model) => !taken.has(model.userData.villainName));
+  const pick = free.length ? free[Math.floor(Math.random() * free.length)] : villains.find((model) => model.userData.villainName === GANG) ?? villains[0];
+  const villain = pick.userData.villainName === GANG ? robberGang(pick) : villainFigure(pick);
+  villain.userData.mixers = villain.userData.mixers ?? [];
+  villain.userData.villainName = pick.userData.villainName;
+  const roofSpot = findRoofSpot(root);
   // Joker is Y-up; Harley, Penguin and Ivy were exported with height along -Z like the props, so stand them up.
   const raw = new THREE.Box3().setFromObject(villain).getSize(new THREE.Vector3());
   villain.rotation.order = 'YXZ';
@@ -1666,19 +1872,78 @@ function syncRooftopVillain(account, root) {
   villain.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(villain);
   const center = bounds.getCenter(new THREE.Vector3());
-  const roofCenter = roof.getCenter(new THREE.Vector3());
-  villain.position.set(roofCenter.x - center.x, roof.max.y - bounds.min.y, roofCenter.z - center.z);
-  villain.traverse((node) => { node.userData.accountId = account.id; if (node.isMesh) node.castShadow = true; });
+  villain.position.set(roofSpot.x - center.x, roofSpot.y - bounds.min.y, roofSpot.z - center.z);
+  villain.traverse((node) => { node.userData.accountId = account.id; });
   root.attach(villain); // keep world placement under the scaled building
   root.userData.villain = villain;
 }
 
+// A clone of a figure playing its idle loop (all its clips, minus the robber's walk and bag throw), from a random point
+// so neighbours don't move in step. SkeletonUtils keeps the robber's skin bound to its own bones.
+function villainFigure(source, mixers) {
+  const figure = cloneSkinned(source);
+  const mixer = new THREE.AnimationMixer(figure);
+  (source.userData.clips ?? []).filter((clip) => !/walk|throw/i.test(clip.name)).forEach((clip) => {
+    const action = mixer.clipAction(clip).play();
+    action.time = Math.random() * clip.duration;
+  });
+  (mixers ?? (figure.userData.mixers = [])).push(mixer);
+  return figure;
+}
+
+function robberGang(robber) {
+  const gang = new THREE.Group();
+  gang.userData.mixers = [];
+  [[0, 0], [-1.5, 0.7], [1.5, 0.7]].forEach(([x, z], i) => { // robber GLB is Y-up, ~1.75 wide
+    const member = villainFigure(robber, gang.userData.mixers);
+    member.position.set(x, 0, z);
+    member.rotation.y = (i - 1) * 0.4;
+    gang.add(member);
+  });
+  return gang;
+}
+
+// Where a figure can stand: rays dropped on a grid over the middle of the building; the highest flat hit with flat
+// neighbours at the same height (a real roof deck, not a spire tip, a flame or a hole into a ruin), nearest the middle.
+// ponytail: 9x9 grid, fine at voxel scale; refine if a roof's only flat patch is narrower than a grid step.
+const roofRay = new THREE.Raycaster();
+function findRoofSpot(root) {
+  const meshes = [];
+  root.traverse((node) => { if (node.isMesh && node !== root.userData.villain && !node.parent?.name?.includes('status-beacon') && !/fire|flame|ember|smoke/i.test(`${node.name} ${node.material?.name}`)) meshes.push(node); });
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  meshes.forEach((mesh) => box.expandByObject(mesh));
+  const center = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
+  const N = 9, grid = [];
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const x = center.x + (i / (N - 1) - 0.5) * size.x * 0.7, z = center.z + (j / (N - 1) - 0.5) * size.z * 0.7;
+    roofRay.set(new THREE.Vector3(x, box.max.y + 1, z), new THREE.Vector3(0, -1, 0));
+    const hit = roofRay.intersectObjects(meshes, false)[0];
+    const flat = hit?.face && hit.face.normal.clone().transformDirection(hit.object.matrixWorld).y > 0.9;
+    grid.push(flat ? { x, y: hit.point.y, z, i, j } : null);
+  }
+  const at = (i, j) => (i >= 0 && j >= 0 && i < N && j < N ? grid[i * N + j] : null);
+  const deck = grid.filter((p) => p && [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([di, dj]) => Math.abs((at(p.i + di, p.j + dj)?.y ?? -1e9) - p.y) < 0.15).length >= 2);
+  const dist = (p) => Math.hypot(p.x - center.x, p.z - center.z);
+  const best = (deck.length ? deck : grid.filter(Boolean)).sort((a, b) => b.y - a.y || dist(a) - dist(b))[0];
+  return best ?? { x: center.x, y: box.max.y, z: center.z };
+}
+
 function applyBuildingState(account) {
-  const root = renderedBuildings.get(account.id);
+  let root = renderedBuildings.get(account.id);
   if (!root) return;
+  // Breached sites burn: swap between the intact tower and its destroyed variant when the status changes.
+  const wanted = loadedBuildingModels && chooseBuildingModel(account, loadedBuildingModels);
+  if (wanted && root.userData.source && wanted !== root.userData.source) {
+    scene.remove(root);
+    renderedBuildings.delete(account.id);
+    addAccountBuilding(account, wanted); // calls back into applyBuildingState with the new root
+    return;
+  }
   syncRooftopVillain(account, root);
   const color = new THREE.Color(statusColors[account.status]);
   const beacon = root.userData.statusBeacon;
+  if (beacon) beacon.visible = account.status !== 'breached'; // the rooftop villain marks a breach instead
   if (beacon) beacon.traverse((node) => { if (node.isMesh && node.material) { node.material.color.copy(color); if (node.material.emissive) node.material.emissive.copy(color); } });
   root.traverse((node) => {
     if (!node.isMesh || !node.material) return;
@@ -1714,6 +1979,7 @@ function renderDirectory() {
 function renderOverview() {
   syncBatSignal();
   syncBreachedTowers();
+  syncIncidents();
   if (document.querySelector('#city-stats').hidden) showCityMood();
   document.querySelector('#clear-count').textContent = String(accounts.filter((account) => account.status === 'clear').length).padStart(2, '0');
   document.querySelector('#breached-count').textContent = String(accounts.filter((account) => account.status === 'breached').length).padStart(2, '0');
@@ -2603,7 +2869,11 @@ function resizeScene() {
 new ResizeObserver(resizeScene).observe(sceneHost);
 resizeScene();
 
+const buildingClock = new THREE.Clock();
 function animate() {
+  if (shadowFrame++ % SHADOW_REFRESH === 0) renderer.shadowMap.needsUpdate = true;
+  const delta = buildingClock.getDelta();
+  renderedBuildings.forEach((root) => { root.userData.mixer?.update(delta); root.userData.villain?.userData.mixers.forEach((mixer) => mixer.update(delta)); });
   city.update(performance.now() / 1000);
   updateShips(performance.now() / 1000);
   updateBatRun(performance.now() / 1000);

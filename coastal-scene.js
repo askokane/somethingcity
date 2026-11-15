@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { beaches, beachPoint } from './coastal-plan.js';
-import { blocks, isOnLand } from './city-plan.js';
+import { blocks, isOnLand, cranePlots } from './city-plan.js';
 import { BEACH_SET_OUT as QUAY_OUT } from './coastal-plan.js'; // the widened shore street: the quay is this far out
 
 export async function createCoastalScene() {
@@ -96,20 +96,21 @@ export async function createCoastalScene() {
   // a port on a west shore is the same layout mirrored.
   const PORT_SCALE = 0.38;
   for (const dock of blocks.filter((b) => b.format === 'dockyard')) {
-    const side = isOnLand(dock.x + 12, dock.z) ? -1 : 1; // which side is the sea
-    const face = dock.x + side * (6 + QUAY_OUT); // the quay edge, past the widened shore street
+    // The port's quay is its crane block's sea face, one block further out (cranePlots in city-plan.js).
+    const crane = cranePlots.reduce((best, c) => (Math.hypot(c.x - dock.x, c.z - dock.z) < Math.hypot(best.x - dock.x, best.z - dock.z) ? c : best));
+    const side = crane.side; // which side is the sea
+    const face = crane.quay; // the quay edge, past the widened shore street
     const out = (d) => face + side * d; // d > 0: further offshore
     const offshore = side > 0 ? Math.PI / 2 : -Math.PI / 2; // turns the kit's +Z toward the sea
     const k = PORT_SCALE;
-    // No marina: the water under the crane, between the rock pile and the breakwater, is the cargo barge's berth.
-    placeWaterfront('Gantry_Crane_Haysville', out(-1.6 - QUAY_OUT), .23, dock.z + 2.6, side > 0 ? 0 : Math.PI, k);
+    // The cargo crane on the crane block, its boom reaching over the quay to the barge's berth.
+    placeWaterfront('Gantry_Crane_Haysville', crane.x + side * 1.6, .23, crane.z, side > 0 ? 0 : Math.PI, k);
     placeWaterfront('Warehouse_Haysville_Docks', dock.x - side * 2.4, .23, dock.z - 1, Math.PI / 2, k);
     placeWaterfront('Container_Rust', dock.x + side * .4, .23, dock.z - 2.6, 0, k);
     placeWaterfront('Container_Teal', dock.x + side * .4, .23 + 2.6 * k, dock.z - 2.6, 0, k);
     placeWaterfront('Container_Slate', dock.x + side * .4, .23, dock.z + 3.2, 0, k);
-    for (const dz of [-3.5, -1.2, 1.2, 3.5]) placeWaterfront('Harbor_Bollard', out(-.35), .23, dock.z + dz, 0, .9);
-    placeWaterfront('Breakwater_Harbor_Light', out(.2), -.28, dock.z + 9.5, offshore, k);
-    placeWaterfront('Riprap_Rock_Pile', out(.4), -.25, dock.z - 7.5, 0, .6);
+    for (const dz of [-3.5, -1.2, 1.2, 3.5]) placeWaterfront('Harbor_Bollard', out(-.35), .08, crane.z + dz, 0, .9);
+    placeWaterfront('Breakwater_Harbor_Light', out(.2), -.28, crane.z + 9.5, offshore, k);
   }
   // Container yards: stacks of the kit's containers (1-3 high) in two banks either side of a centre aisle.
   for (const yard of blocks.filter((b) => b.format === 'containeryard')) {
@@ -157,10 +158,6 @@ export async function createCoastalScene() {
     }
     if (b.format === 'dockyard') {
       place('Lifeguard_Hut', b.x - 2, .23, b.z - 2);
-      const sea = isOnLand(b.x + 12, b.z) ? -1 : 1;
-      // The jetty stands beyond the breakwater, outside the port (north of the rock pile where the shore ends first).
-      const jz = isOnLand(b.x + sea * 5, b.z + 13) ? b.z + 13 : b.z - 11;
-      place('Harbor_Jetty', b.x + sea * (6 + QUAY_OUT), 0, jz, sea > 0 ? Math.PI / 2 : -Math.PI / 2, .6);
       place('Coast_Bench', b.x - 2, .23, b.z + 2, Math.PI / 2);
     }
   }

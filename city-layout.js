@@ -6,7 +6,7 @@ import { isBeachEdge } from './coastal-plan.js';
 import { seededRandom } from './city-scatter.js';
 
 
-import { blocks, slots, islands, bridges, landCells, edges, landmarks, FLOOR, isOnLand, SHORE_SET_OUT } from './city-plan.js';
+import { blocks, slots, islands, bridges, landCells, edges, landmarks, FLOOR, isOnLand, SHORE_SET_OUT, sandShore, SAND_BEACH_WIDTH } from './city-plan.js';
 export * from './city-plan.js';
 
 // Which side of a shore edge is land, and which block owns that land.
@@ -20,20 +20,25 @@ const shoreSide = (edge) => {
   return { block: blockOf.get(`${inner[0]},${inner[1]}`), outward };
 };
 // Working waterfronts keep their seawall: the docks, the container yard and Ace Chemicals.
-const keepsSeawall = (block) => ['dockyard', 'containeryard'].includes(block?.format) || landmarks.some((l) => l.name === 'Ace Chemicals' && blocks[l.block] === block);
+const keepsSeawall = (block) => ['dockyard', 'containeryard', 'craneyard'].includes(block?.format) || landmarks.some((l) => l.name === 'Ace Chemicals' && blocks[l.block] === block);
 // Shoreline streets were half a street (the land-side lane, sand beyond). Away from beaches and working waterfronts the
 // coast is pushed out one lane so they are full two-lane streets; keyed by the edge's midpoint "x,z".
 // The widened shore's sidewalk bands, laid with Tai's sidewalk kit in app.js: { x, z, length, vertical, outward }.
 export const shoreSidewalks = [];
 // On the docks' and container yard's port face (the sea side the cranes work, east or west) there is no shore street:
 // their deck runs from the block out to the quay. Their other shores keep the street. Keyed by edge midpoint "x,z".
-const isDeckBlock = (block) => ['dockyard', 'containeryard'].includes(block?.format);
-export const deckEdges = new Set(edges.filter((edge) => {
+const isDeckBlock = (block) => ['dockyard', 'containeryard', 'craneyard'].includes(block?.format);
+const isPortFace = (edge) => {
   if (!edge.shore || !edge.vertical) return false;
   const side = shoreSide(edge);
   return isDeckBlock(side.block) && side.outward === (isOnLand(side.block.x + 12, side.block.z) ? -1 : 1);
-}).map((edge) => `${edge.x},${edge.z}`));
-export const widenedShore = new Set(edges.filter((edge) => edge.shore && !deckEdges.has(`${edge.x},${edge.z}`)).map((edge) => `${edge.x},${edge.z}`));
+};
+// A bridge's landing block (an avenue) right beside a port carries the quay on past the bridge end, so the deck and the
+// bridge road meet cleanly instead of a strip of shore street and sand wedged between them.
+const besidePort = (edge) => edge.shore && edge.vertical && shoreSide(edge).block?.format === 'avenue'
+  && edges.some((e) => e.x === edge.x && Math.abs(e.z - edge.z) === 12 && isPortFace(e) && shoreSide(e).outward === shoreSide(edge).outward);
+export const deckEdges = new Set(edges.filter((edge) => isPortFace(edge) || besidePort(edge)).map((edge) => `${edge.x},${edge.z}`));
+export const widenedShore = new Set(edges.filter((edge) => edge.shore && !deckEdges.has(`${edge.x},${edge.z}`) && !sandShore.has(`${edge.x},${edge.z}`)).map((edge) => `${edge.x},${edge.z}`));
 const LANE_WIDTH = 1.5;
 
 export function createCity(scene) {
@@ -80,7 +85,7 @@ export function createCity(scene) {
     cube(c.x, 0.03, c.z, 12, 0.08, 12, '#252d35');
   }
   for (const b of blocks) {
-    const color = b.format === 'suburb' ? '#3c5040' : b.format === 'garden' ? '#496455' : b.format === 'market' ? '#666258' : b.format === 'plaza' ? '#496455' : b.format === 'dockyard' || b.format === 'containeryard' ? '#64665d' : '#555c62';
+    const color = b.format === 'suburb' ? '#3c5040' : b.format === 'garden' ? '#496455' : b.format === 'market' ? '#666258' : b.format === 'plaza' ? '#496455' : ['dockyard', 'containeryard', 'craneyard'].includes(b.format) ? '#64665d' : '#555c62';
     // Inside the 0.6 sidewalk ring (Tai's kit, laid in app.js). An avenue is two strips either side of its road.
     if (b.format === 'avenue') {
       const alongX = b.avenue === 'x';
@@ -125,10 +130,16 @@ export function createCity(scene) {
     if (!landAt.has(step(inner, end * 12, 0).join(','))) return 'outside';
     return landAt.has(step(inner, end * 12, outward * 12).join(',')) ? 'inside' : 'straight';
   };
-  const sandStrip = (edge, outward, sand = true) => {
+  // A thick beach instead of the shore street: dry sand from the block's edge (over the old street) well out to sea, then
+  // a wide wet lip sloping under the water.
+  const thickBeach = [
+    [-1.5, SAND_BEACH_WIDTH - 1.5, -0.4, 1.0, '#c9b48a'], // top at 0.1, just over the old asphalt
+    [SAND_BEACH_WIDTH - 2.2, SAND_BEACH_WIDTH, -0.6, 0.6, '#a8916a'], // top at -0.3
+  ];
+  const sandStrip = (edge, outward, sand = true, thick = false) => {
     const along = edge.vertical ? edge.z : edge.x;
     const ends = [-1, 1].map((end) => cornerKind(edge, outward, end));
-    for (const [from, to, y, height, color] of sand ? layers : layers.slice(0, 3)) {
+    for (const [from, to, y, height, color] of thick ? thickBeach : sand ? layers : layers.slice(0, 3)) {
       const reach = edge.vertical ? to : from; // how far past the corner this band runs (or stops short of it)
       const [start, stop] = [-1, 1].map((end, i) => along + end * (6 + (ends[i] === 'outside' ? reach : ends[i] === 'inside' ? -reach : 0)));
       const mid = (start + stop) / 2, length = stop - start;
@@ -139,19 +150,21 @@ export function createCity(scene) {
       }
       cube(edge.vertical ? across : mid, y, edge.vertical ? mid : across, edge.vertical ? to - from : length, height, edge.vertical ? length : to - from, color);
     }
+    if (thick) return; // no street, so no lane dashes
     for (const offset of [-4.5, -1.5, 1.5, 4.5]) cube(edge.x + (edge.vertical ? 0 : offset), .085, edge.z + (edge.vertical ? offset : 0), edge.vertical ? .06 : 1.2, .015, edge.vertical ? 1.2 : .06, '#b1a383');
   };
   for (const edge of edges) {
     const side = edge.shore ? shoreSide(edge) : null;
-    if (side && !keepsSeawall(side.block)) {
-      sandStrip(edge, side.outward, !isBeachEdge(edge)); // a beach brings its own sand
+    if (side && !keepsSeawall(side.block) && !deckEdges.has(`${edge.x},${edge.z}`)) { // quay edges are built below
+      sandStrip(edge, side.outward, !isBeachEdge(edge), sandShore.has(`${edge.x},${edge.z}`)); // a beach brings its own sand
     } else if (side) {
       // Working waterfronts reach the same line: the docks' deck covers what was the shore street out to the quay; Ace
       // Chemicals keeps a widened street. Either way the seawall stands at the new quay edge.
       if (deckEdges.has(`${edge.x},${edge.z}`)) {
         const across = (edge.vertical ? edge.x : edge.z) + side.outward * (SHORE_SET_OUT - 1.5) / 2;
         const length = 12 + 2 * SHORE_SET_OUT; // closes the corners; a hair above the street layers it may overlap there
-        cube(edge.vertical ? across : edge.x, 0.125, edge.vertical ? edge.z : across, edge.vertical ? SHORE_SET_OUT + 1.5 : length, 0.23, edge.vertical ? length : SHORE_SET_OUT + 1.5, '#64665d');
+        // Street level (top 0.08, just over the asphalt), so the streets run on onto the quay; the quay is a street too.
+        cube(edge.vertical ? across : edge.x, -0.035, edge.vertical ? edge.z : across, edge.vertical ? SHORE_SET_OUT + 1.5 : length, 0.23, edge.vertical ? length : SHORE_SET_OUT + 1.5, '#64665d');
         cube(edge.vertical ? across : edge.x, -0.89, edge.vertical ? edge.z : across, edge.vertical ? SHORE_SET_OUT + 1.5 : length, 1.82, edge.vertical ? length : SHORE_SET_OUT + 1.5, '#46515a');
       } else {
         sandStrip(edge, side.outward, false);

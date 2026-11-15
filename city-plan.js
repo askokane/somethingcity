@@ -23,8 +23,8 @@ const GOTHAM = [
   'BBB.......N...DDDD',
   'BBB...........DDDD',
   'BBB..DDDDDDDDDDDD',
-  'BBB...DDDDDDDDDDD',
-  'BBB....DDDDDDDD..',
+  'BBB..DDDDDDDDDDDDD', // col 5: West Harlow's container yard; col 17: Haysville's crane block, built out into the water
+  'BBB..DDDDDDDDDD..', // cols 5-6: West Harlow's crane plot, filling the water south of the port
   'BBB..............',
   'BBB...HHH........',
   '.BB....HH........',
@@ -43,7 +43,7 @@ function districtOf(region, col) {
 
 const landmarkSpecs = [
   // [name, model, [row, col], height]: each sits in its district from the map.
-  ['Wayne Tower', 'wayne_tower.glb', [12, 11], 30], // Downtown, on a 2x2-block site with a forecourt; the city's tallest tower
+  ['Wayne Tower', 'wayne_tower.glb', [12, 11], 30], // Downtown, on one block like every landmark; the city's tallest tower
   ['Arkham Asylum', 'arkham_asylum_8bit.glb', [10, 10], 7], // the Narrows
   ['GCPD Headquarters', 'gcpd_headquarters_8bit.glb', [1, 12], 5], // Uptown
   ['Gotham Bank', 'gotham_bank_8bit.glb', [7, 11], 6], // Midtown, the financial core
@@ -133,9 +133,8 @@ merge(['3,10', '3,11'], 'garden', 'Robinson Park'); // Uptown
 merge(['7,6', '7,7'], 'garden', 'Gotham Commons'); // Reatton, on the river
 merge(['12,6', '12,7'], 'market', 'Chinatown Market'); // Downtown west
 merge(['14,11', '14,12'], 'garden', 'Stevensburgh Green'); // Downtown, by the south shore
-// Wayne Tower's site: four blocks, so the tower keeps its real proportions (scaled evenly) and is still comically tall.
-merge(['12,11', '12,12', '13,11', '13,12'], 'landmark', 'Stevensburgh');
-for (const [id, format, district] of [['13,9', 'plaza', 'Founders Square'], ['13,16', 'dockyard', 'Haysville Docks'], ['12,16', 'containeryard', 'Haysville Container Yard'], ['13,6', 'dockyard', 'West Harlow Docks'], ['1,15', 'garden', 'North Point Park']]) {
+merge(['14,5', '14,6'], 'craneyard', 'West Harlow Crane Yard'); // the port's crane plot, built out over the water
+for (const [id, format, district] of [['13,9', 'plaza', 'Founders Square'], ['13,16', 'dockyard', 'Haysville Docks'], ['12,16', 'containeryard', 'Haysville Container Yard'], ['13,6', 'dockyard', 'West Harlow Docks'], ['13,5', 'containeryard', 'West Harlow Container Yard'], ['13,17', 'craneyard', 'Haysville Crane Yard'], ['1,15', 'garden', 'North Point Park']]) {
   const b = blocks.find((block) => block.sourceId === id);
   b.format = format; b.district = district; b.width = b.depth = 9;
 }
@@ -161,7 +160,7 @@ for (const span of bridgeSpans) {
 }
 
 export const slots = blocks.flatMap((b, block) => {
-  const offsets = ['landmark','garden','plaza','dockyard','containeryard','suburb','avenue'].includes(b.format) ? []
+  const offsets = ['landmark','garden','plaza','dockyard','containeryard','craneyard','suburb','avenue'].includes(b.format) ? []
     : b.format === 'market' ? [[-7.5, 0], [-2.5, 0], [2.5, 0], [7.5, 0]]
     : b.format === 'terrace' ? [[0, -2.25], [0, 2.25]]
     : b.format === 'courtyard' ? [[-2.25, 0], [2.25, 0]]
@@ -184,5 +183,20 @@ for (const c of landCells) for (const [dx, dz] of [[12, 0], [-12, 0], [0, 12], [
   const shore = !land.has(next);
   if (!shore && owner.get(next) === owner.get(`${c.x},${c.z}`)) continue;
   if (!shore && (dx < 0 || dz < 0)) continue;
-  edges.push({ x: c.x + dx / 2, z: c.z + dz / 2, vertical: dx !== 0, shore });
+  edges.push({ x: c.x + dx / 2, z: c.z + dz / 2, vertical: dx !== 0, shore, row: c.row, col: c.col, out: [Math.sign(dx), Math.sign(dz)], island: c.island });
 }
+// Thick sand beaches with no shore street: Wayne Estate's three water sides (Bristol Township rows 1-4). The rest of
+// Bristol's coast keeps its shore street. Keyed by edge midpoint "x,z".
+export const SAND_BEACH_WIDTH = 7.5; // sand reaches this far out from the old shoreline (the street's centreline)
+// Each port's crane block: a whole block of quay built out into the water beside the dockyard, for the cargo crane.
+// `side` is the sea side (+1 east, -1 west), `quay` the x of its quay edge, `yaw` turns a model's +Z toward the sea.
+// x/z is the centre of the plot's seaward cell (where the crane stands).
+export const cranePlots = blocks.filter((b) => b.format === 'craneyard').map((b) => {
+  const side = isOnLand(b.x + b.width / 2 + 7.5, b.z) ? -1 : 1;
+  const cell = b.cells.reduce((best, c) => (c.x * side > best.x * side ? c : best));
+  return { name: b.district, x: cell.x, z: cell.z, side, quay: cell.x + side * (6 + SHORE_SET_OUT), yaw: side > 0 ? Math.PI / 2 : -Math.PI / 2 };
+});
+export const sandShore = new Set(edges.filter((e) => e.shore && e.island === 'Bristol Township' && e.row <= 4).map((e) => `${e.x},${e.z}`));
+// Is (x, z) on a sand-beach edge's street line (within `reach` across it)?
+export const onSandShore = (x, z, reach = 2) => edges.some((e) => sandShore.has(`${e.x},${e.z}`)
+  && Math.abs((e.vertical ? z - e.z : x - e.x)) <= 6 && Math.abs(e.vertical ? x - e.x : z - e.z) <= reach);

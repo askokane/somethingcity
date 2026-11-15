@@ -222,7 +222,39 @@ export function summarize(check, now = Date.now()) {
 }
 
 // Fictional services. Categories only: never leaked values.
+// "current@demo.test" has breaches from the last few months, dated relative to today so they always count as current
+// (the city treats a breach as current for 12 months), plus one old breach and some clean accounts.
+const daysAgo = (days) => new Date(Date.now() - days * 864e5).toISOString().slice(0, 10);
+const CURRENT = {
+  breaches: [
+    { name: "Streamly", date: daysAgo(24), exposedData: ["Email addresses", "Names", "Passwords"], domain: "streamly.example" },
+    { name: "QuickCart", date: daysAgo(68), exposedData: ["Email addresses", "Passwords", "Phone numbers", "Physical addresses"], domain: "quickcart.example" },
+    { name: "ChatterBox", date: daysAgo(141), exposedData: ["Email addresses", "Usernames", "IP addresses"], domain: "chatterbox.example" },
+    { name: "PayPocket", date: daysAgo(229), exposedData: ["Email addresses", "Names", "Dates of birth", "Partial credit card data"], domain: "paypocket.example" },
+    { name: "PixelMart", date: "2021-06-14", exposedData: ["Email addresses", "Passwords", "Usernames"], domain: "pixelmart.example" },
+  ],
+  inbox: [
+    { name: "Streamly", domain: "streamly.example", firstSeen: "2020-11-20", lastSeen: daysAgo(3) },
+    { name: "QuickCart", domain: "quickcart.example", firstSeen: "2021-04-02", lastSeen: daysAgo(10) },
+    { name: "ChatterBox", domain: "chatterbox.example", firstSeen: "2019-08-30", lastSeen: daysAgo(40) },
+    { name: "PayPocket", domain: "paypocket.example", firstSeen: "2022-01-12", lastSeen: daysAgo(6) },
+    { name: "PixelMart", domain: "pixelmart.example", firstSeen: "2019-03-02", lastSeen: "2023-05-01" },
+    { name: "FitLoop", domain: "fitloop.example", firstSeen: "2024-01-15", lastSeen: daysAgo(2) },
+    { name: "BookNook", domain: "booknook.example", firstSeen: "2022-07-08", lastSeen: daysAgo(90) },
+    { name: "TrailNote", domain: "trailnote.example", firstSeen: "2023-03-19", lastSeen: daysAgo(30) },
+    { name: "CloudVault", domain: "cloudvault.example", firstSeen: "2018-10-05", lastSeen: daysAgo(14) },
+    { name: "NewsDaily", domain: "newsdaily.example", firstSeen: "2017-02-21", lastSeen: daysAgo(1) },
+  ],
+  services: new Map([
+    ["streamly.example", [{ name: "Streamly", date: daysAgo(24), exposedData: ["Email addresses", "Names", "Passwords"], records: 6100000, industry: "Entertainment" }]],
+    ["quickcart.example", [{ name: "QuickCart", date: daysAgo(68), exposedData: ["Email addresses", "Passwords", "Phone numbers", "Physical addresses"], records: 2400000, industry: "Retail" }]],
+    ["chatterbox.example", [{ name: "ChatterBox", date: daysAgo(141), exposedData: ["Email addresses", "Usernames", "IP addresses"], records: 11800000, industry: "Social media" }]],
+    ["paypocket.example", [{ name: "PayPocket", date: daysAgo(229), exposedData: ["Email addresses", "Names", "Dates of birth", "Partial credit card data"], records: 950000, industry: "Finance" }]],
+    ["pixelmart.example", [{ name: "PixelMart", date: "2021-06-14", exposedData: ["Email addresses", "Passwords", "Usernames"], records: 1300000, industry: "Retail" }]],
+  ]),
+};
 const FIXTURES = {
+  "current@demo.test": CURRENT,
   "breached@demo.test": {
     breaches: [
       { name: "PixelMart", date: "2021-06-14", exposedData: ["Email addresses", "Passwords", "Usernames"], domain: "pixelmart.example" },
@@ -253,7 +285,7 @@ const FIXTURE_SERVICE_BREACHES = new Map([
   ["trailnote.example", [{ name: "TrailNote", date: "2023-02-03", exposedData: ["Email addresses", "IP addresses"], records: 870000 }]],
 ]);
 
-export const DEMO_ACCOUNTS = ["city@demo.test", "breached@demo.test", "clear@demo.test", "unknown@demo.test"];
+export const DEMO_ACCOUNTS = ["city@demo.test", "current@demo.test", "breached@demo.test", "clear@demo.test", "unknown@demo.test"];
 
 /**
  * Check one account. Throws Error("Enter a valid email address.") on bad input (raw value is never echoed).
