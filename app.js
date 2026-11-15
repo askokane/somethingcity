@@ -1924,6 +1924,113 @@ function placeBillboards() {
   }, 300);
 }
 
+// ---- Selection arrow and police helicopters --------------------------------------------------------------------------
+// Tai's selection arrow (models/everything-else/gotham_selection_arrow.glb, with its bob) hovers over the selected
+// website, above any villain on its roof, turned to the camera. It follows the selection and the building being rebuilt.
+const ARROW_SCALE = 2.6, ARROW_GAP = 0.8;
+let selectionArrow = null;
+loadModel('./models/everything-else/gotham_selection_arrow.glb').then((model) => {
+  selectionArrow = new THREE.Group();
+  model.scale.setScalar(ARROW_SCALE);
+  model.traverse((node) => { if (node.isMesh) node.raycast = () => {}; });
+  selectionArrow.add(model);
+  selectionArrow.rotation.y = Math.PI / 4;
+  selectionArrow.visible = false;
+  selectionArrow.userData.mixer = new THREE.AnimationMixer(model);
+  (model.userData.clips ?? []).forEach((clip) => selectionArrow.userData.mixer.clipAction(clip).play());
+  scene.add(selectionArrow);
+}).catch(() => {});
+function updateSelectionArrow(delta) {
+  if (!selectionArrow) return;
+  const root = renderedBuildings.get(selectedId);
+  const key = root ? `${root.uuid}/${root.userData.villain?.uuid ?? ''}` : '';
+  if (key !== selectionArrow.userData.key) {
+    selectionArrow.userData.key = key;
+    selectionArrow.visible = !!root;
+    if (root) {
+      // Over the tower (and its villain); not its smoke, which rises far above the roof.
+      const box = new THREE.Box3().setFromObject(root.children[0]);
+      if (root.userData.villain) box.union(new THREE.Box3().setFromObject(root.userData.villain));
+      const centre = box.getCenter(new THREE.Vector3());
+      selectionArrow.position.set(centre.x, box.max.y + ARROW_GAP, centre.z);
+    }
+  }
+  if (selectionArrow.visible) selectionArrow.userData.mixer.update(delta);
+}
+
+// Tai's GCPD helicopter (models/everything-else/gotham_police_helicopter.glb: rotors, hover bob and searchlight sweep in
+// its loop; nose along -Z). One circles every breached tower; two more fly the streets on routes across the city.
+const HELI = { scale: 0.6, orbit: 7, above: 5, orbitSpeed: 0.35, patrolHeight: 16, patrolSpeed: 9 };
+let heliModel = null;
+const circlingHelis = new Map(); // account id -> helicopter
+const patrolHelis = [];
+loadModel('./models/everything-else/gotham_police_helicopter.glb').then((model) => {
+  heliModel = model;
+  for (let i = 0; i < 2; i++) patrolHelis.push({ heli: makeHeli(i * 2.1), path: [], leg: 0, t: 0 });
+}).catch(() => {});
+function makeHeli(phase) {
+  const heli = new THREE.Group();
+  const body = heliModel.clone(true);
+  body.scale.setScalar(HELI.scale);
+  body.traverse((node) => { if (node.isMesh) node.raycast = () => {}; });
+  heli.add(body);
+  heli.rotation.order = 'YXZ';
+  const mixer = new THREE.AnimationMixer(body);
+  (heliModel.userData.clips ?? []).forEach((clip) => { const action = mixer.clipAction(clip).play(); action.time = phase % clip.duration; });
+  heli.userData.mixer = mixer;
+  scene.add(heli);
+  return heli;
+}
+// Nose (-Z) along a heading (dx, dz), banked into the turn by `bank`.
+function steerHeli(heli, dx, dz, bank, dt) {
+  const want = Math.atan2(-dx, -dz);
+  const turn = Math.atan2(Math.sin(want - heli.rotation.y), Math.cos(want - heli.rotation.y));
+  heli.rotation.y += turn * Math.min(1, dt * 3);
+  heli.rotation.z = bank;
+}
+function updateHelicopters(time, dt) {
+  if (!heliModel) return;
+  // One circling each breached tower, round its roof.
+  const breached = new Set(accounts.filter((account) => account.status === 'breached' && renderedBuildings.has(account.id)).map((account) => account.id));
+  for (const [id, heli] of circlingHelis) if (!breached.has(id)) { scene.remove(heli); circlingHelis.delete(id); }
+  let n = 0;
+  for (const id of breached) {
+    if (!circlingHelis.has(id)) circlingHelis.set(id, makeHeli(n * 1.3));
+    const heli = circlingHelis.get(id), root = renderedBuildings.get(id);
+    if (!heli.userData.top || heli.userData.root !== root) {
+      const box = new THREE.Box3().setFromObject(root.children[0]);
+      heli.userData.root = root;
+      heli.userData.top = box.max.y;
+      heli.userData.centre = box.getCenter(new THREE.Vector3());
+    }
+    const a = time * HELI.orbitSpeed + n * 1.9, c = heli.userData.centre;
+    heli.position.set(c.x + Math.cos(a) * HELI.orbit, heli.userData.top + HELI.above, c.z + Math.sin(a) * HELI.orbit);
+    steerHeli(heli, -Math.sin(a), Math.cos(a), -0.22, dt);
+    heli.userData.mixer.update(dt);
+    n++;
+  }
+  // Two on patrol: a road route to a random spot across the city, then another.
+  for (const patrol of patrolHelis) {
+    const { heli } = patrol;
+    if (patrol.leg >= patrol.path.length - 1) {
+      const nodes = [...roadGraph.values()].filter((node) => node.links.size);
+      const here = patrol.path.length ? patrol.path.at(-1) : nodes[Math.floor(Math.random() * nodes.length)];
+      let goal = here;
+      for (let tries = 0; tries < 8 && Math.hypot(goal.x - here.x, goal.z - here.z) < 60; tries++) goal = nodes[Math.floor(Math.random() * nodes.length)];
+      patrol.path = routeBetween(here, goal);
+      patrol.leg = 0; patrol.t = 0;
+      if (!heli.userData.placed) { heli.position.set(here.x, HELI.patrolHeight, here.z); heli.userData.placed = true; }
+    }
+    const a = patrol.path[patrol.leg], b = patrol.path[patrol.leg + 1];
+    const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    patrol.t += (HELI.patrolSpeed * dt) / len;
+    if (patrol.t >= 1) { patrol.leg++; patrol.t = 0; }
+    heli.position.set(a.x + (b.x - a.x) * Math.min(1, patrol.t), HELI.patrolHeight, a.z + (b.z - a.z) * Math.min(1, patrol.t));
+    steerHeli(heli, b.x - a.x, b.z - a.z, 0, dt);
+    heli.userData.mixer.update(dt);
+  }
+}
+
 function finishInitialLoad() {
   if (!environmentReady || !accountModelsReady) return;
   if (!npcs.length) spawnPedestrians();
@@ -3364,6 +3471,8 @@ function animate() {
   updatePedestrians(performance.now() / 1000);
   updateTraffic(performance.now() / 1000);
   updateBlimp(performance.now() / 1000);
+  updateSelectionArrow(delta);
+  updateHelicopters(performance.now() / 1000, Math.min(delta, 0.1));
   controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
