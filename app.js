@@ -3286,15 +3286,14 @@ renderer.domElement.addEventListener('pointerup', (event) => {
   }
 });
 
-// The Landmarks menu (nav): every landmark that opens something, with a one-line TL;DR. Choosing one does exactly what
+// The Landmarks menu (nav): the landmarks that add something the nav tabs don't, with a one-line TL;DR (Gotham Bank
+// repeats Accounts and Wayne Tower isn't about the user, so they stay click-only in the city). Choosing one does exactly what
 // clicking the building does: Batman heads over and its report opens.
 const LANDMARK_MENU = [
   ['GCPD Headquarters', 'gcpd', 'Mission board: prioritized fixes for your breached sites, with links and progress.'],
   ['Ace Chemicals', 'ace', 'Spill report: what data leaked across all your breached sites.'],
-  ['Gotham Bank', 'bank', 'Account vault: every site linked to your email, by when you joined.'],
   ['Cobblepot Manor', 'cobblepot', 'Breach news: the latest publicly reported breaches.'],
   ['Arkham Asylum', 'arkham', 'Reading room: what a breach match does and doesn\'t mean.'],
-  ['Wayne Tower', 'wayne', 'City atlas: a census of the map, independent of your check.'],
 ];
 const landmarkButton = document.querySelector('#nav-landmarks');
 const landmarkMenu = document.createElement('div');
