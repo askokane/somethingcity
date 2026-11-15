@@ -1,4 +1,4 @@
-// Breach City live checker server. Run: node checker/server.js
+// BreachLink live checker server. Run: node checker/server.js
 // Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PUBLIC_URL, PORT, HOST
 import http from "node:http";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
@@ -70,10 +70,10 @@ async function sendCode(email, code) {
     method: "POST",
     headers: { authorization: `Bearer ${process.env.RESEND_API_KEY}`, "content-type": "application/json" },
     body: JSON.stringify({
-      from: process.env.EMAIL_FROM || "Breach City <onboarding@resend.dev>",
+      from: process.env.EMAIL_FROM || "BreachLink <onboarding@resend.dev>",
       to: [email],
-      subject: `Your Breach City code: ${code}`,
-      text: `Your Breach City verification code is ${code}. It expires in 10 minutes. If you didn't ask for this, ignore this email.`,
+      subject: `Your BreachLink code: ${code}`,
+      text: `Your BreachLink verification code is ${code}. It expires in 10 minutes. If you didn't ask for this, ignore this email.`,
     }),
     signal: AbortSignal.timeout(10000),
   });
@@ -182,7 +182,7 @@ async function googleCallback(req, res) {
 
 // --- Dev test page: sign in with Google and list linked accounts, no frontend needed ---
 // Set FRONTEND_URL=http://localhost:8787/dev to land here after Google sign-in.
-const DEV_PAGE = `<!doctype html><meta charset="utf-8"><title>Breach City checker</title>
+const DEV_PAGE = `<!doctype html><meta charset="utf-8"><title>BreachLink checker</title>
 <style>
 :root{color-scheme:dark;--ink:#f3f0d1;--muted:#a9c2c0;--line:#416174;--gold:#ffd45e;--teal:#7ce3bd;font-family:"Courier New",monospace;background:#101a25;color:var(--ink)}
 *{box-sizing:border-box}body{max-width:none!important;min-height:100vh;margin:0!important;padding:34px!important;background-color:#101a25;background-image:linear-gradient(#132130 1px,transparent 1px),linear-gradient(90deg,#132130 1px,transparent 1px),radial-gradient(ellipse at 50% 0%,#25475a 0,#152a3a 42%,#101a25 78%);background-size:8px 8px,8px 8px,auto}
@@ -190,7 +190,7 @@ body>*{max-width:900px;margin-left:auto;margin-right:auto}h1{margin:36px auto 10
 @media(max-width:600px){body{padding:16px!important}h1{margin-top:24px!important}body>p{align-items:stretch;flex-direction:column}body>p::first-line{display:none}}
 </style>
 <body style="font:14px ui-monospace,monospace;max-width:900px;margin:2rem auto;padding:0 1rem">
-<h1 style="font-size:18px">Breach City checker (dev)</h1>
+<h1 style="font-size:18px">BreachLink checker (dev)</h1>
 <p><a href="/auth/google">Sign in with Google</a> · <a href="#" id="logout">Sign out</a></p>
 <pre id="out">Checking…</pre>
 <script type="module">
@@ -311,7 +311,7 @@ export const server = http.createServer(async (req, res) => {
 
 if (import.meta.main) {
   server.listen(PORT, HOST, () => {
-    console.log(`Breach City checker on http://${HOST}:${PORT}${PUBLIC_URL ? ` (public: ${PUBLIC_URL}, /dev ${DEV_PAGE_ON ? "on" : "off"})` : ""}`);
+    console.log(`BreachLink checker on http://${HOST}:${PORT}${PUBLIC_URL ? ` (public: ${PUBLIC_URL}, /dev ${DEV_PAGE_ON ? "on" : "off"})` : ""}`);
     console.log(`  email codes: ${process.env.RESEND_API_KEY ? "sent with Resend" : "printed here (no RESEND_API_KEY)"}`);
     console.log(`  Google sign-in + inbox scan: ${process.env.GOOGLE_CLIENT_ID ? "on" : "off (no GOOGLE_CLIENT_ID)"}`);
     console.log(`  Tiger Data timeline + service breaches: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL; using in-memory catalog)"}`);  });

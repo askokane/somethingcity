@@ -1,6 +1,6 @@
 # Gotham Harbor Fleet
 
-An original, low-poly fleet for Breach City. The vessels use the coastal kit's weathered wood, oxidized teal, slate, fog ivory, and restrained lamp glow. Chunky silhouettes and faceted hulls match the project's pixel-styled Gotham environment.
+An original, low-poly fleet for BreachLink. The vessels use the coastal kit's weathered wood, oxidized teal, slate, fog ivory, and restrained lamp glow. Chunky silhouettes and faceted hulls match the project's pixel-styled Gotham environment.
 
 ## Files
 

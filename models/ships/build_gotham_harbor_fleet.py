@@ -1,4 +1,4 @@
-"""Build a low-poly, pixel-styled harbor fleet for Breach City / Gotham.
+"""Build a low-poly, pixel-styled harbor fleet for BreachLink / Gotham.
 
 Local coordinates use X length, Y up, Z beam. Mesh coordinates are converted
 to Blender's Z-up convention; glTF exports with the intended Y-up orientation.

@@ -1,6 +1,6 @@
 # Gotham Waterfront Kit
 
-Low-poly waterfront models built for Breach City's unit-scale city and its muted Gotham palette: graphite, slate, oxidized teal, fog ivory, wet timber, foundry red, and warm harbor lights.
+Low-poly waterfront models built for BreachLink's unit-scale city and its muted Gotham palette: graphite, slate, oxidized teal, fog ivory, wet timber, foundry red, and warm harbor lights.
 
 ## Models
 

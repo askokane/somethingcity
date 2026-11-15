@@ -1,7 +1,7 @@
 ﻿# Justin — Account Infrastructure Instructions
 
 ## Mission
-Build the account entry and breach-check layer for the Breach City demo. It should accept user-authorized account identifiers, return a safe normalized result, and remain demoable when a live provider is unavailable.
+Build the account entry and breach-check layer for the BreachLink demo. It should accept user-authorized account identifiers, return a safe normalized result, and remain demoable when a live provider is unavailable.
 
 ## Step-by-step prompting workflow
 Use these prompts in order, sharing the current interface and setup details as they become available:

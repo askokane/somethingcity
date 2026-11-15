@@ -30,13 +30,20 @@ export function serviceUrl(domain) {
 
 export function readProgress(storage, scope) {
   try {
-    const value = JSON.parse(storage.getItem(`breach-city:missions:v1:${scope}`) || '{}');
+    const key = `breachlink:missions:v1:${scope}`;
+    const saved = storage.getItem(key);
+    // Carry forward mission progress stored under the previous product name.
+    const legacy = saved === null ? storage.getItem(`breach-city:missions:v1:${scope}`) : null;
+    const value = JSON.parse(saved ?? legacy ?? '{}');
+    if (saved === null && legacy !== null) {
+      try { storage.setItem(key, legacy); } catch { /* Progress remains readable if storage is full. */ }
+    }
     return value && typeof value === 'object' && !Array.isArray(value)
       ? Object.fromEntries(Object.entries(value).filter(([, date]) => typeof date === 'string' && !Number.isNaN(Date.parse(date)))) : {};
   } catch { return {}; }
 }
 
 export function saveProgress(storage, scope, progress) {
-  try { storage.setItem(`breach-city:missions:v1:${scope}`, JSON.stringify(progress)); return true; }
+  try { storage.setItem(`breachlink:missions:v1:${scope}`, JSON.stringify(progress)); return true; }
   catch { return false; }
 }

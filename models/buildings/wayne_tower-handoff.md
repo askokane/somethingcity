@@ -1,4 +1,4 @@
-# Wayne Tower — Breach City asset handoff
+# Wayne Tower — BreachLink asset handoff
 
 - **Files:** `wayne_tower.glb` for the product, `wayne_tower.blend` for editing, and `wayne_tower.png` for preview. `build_wayne_tower.py` creates the original 6 m version; the current 12 m asset was extended in Blender.
 - **Design:** Compact 8-bit-inspired interpretation of the supplied Wayne Tower reference: tiered slate Art Deco massing, amber windows, a pixel-letter `W` and `WAYNE` sign, stepped entrance, crown lights, and red roof beacons.

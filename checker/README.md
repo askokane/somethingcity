@@ -1,6 +1,6 @@
-# Breach City checker: frontend guide
+# BreachLink checker: frontend guide
 
-The backend for Breach City (Justin's workstream). It turns an email the user **proves they own** into a city: **one skyscraper per website** linked to that email, colored by breach status. Alongside it come the stats, news and advice for the **8 Gotham landmark buildings** that hold the HUD panels.
+The backend for BreachLink (Justin's workstream). It turns an email the user **proves they own** into a city: **one skyscraper per website** linked to that email, colored by breach status. Alongside it come the stats, news and advice for the **8 Gotham landmark buildings** that hold the HUD panels.
 
 **For the frontend, in short:**
 1. Get a result: a demo account works offline; real emails need an email code or Google sign-in.
@@ -262,10 +262,10 @@ Each step happens in your own Google account:
 **Signing in, step by step** (what every tester will see):
 
 1. **"Google hasn't verified this app"**: normal for Testing mode. Click **Continue**.
-2. **"Sign in to Breach City"**: this shares only the email address. Click **Continue**.
-3. **"Breach City wants access to your Google Account"**: **tick** "View your email messages and settings", then click **Continue**. The box starts **unticked**. If it's left unticked, sign-in still works, but nothing is scanned (`?signin=no-inbox`, and the console says `Gmail access not granted`).
+2. **"Sign in to BreachLink"**: this shares only the email address. Click **Continue**.
+3. **"BreachLink wants access to your Google Account"**: **tick** "View your email messages and settings", then click **Continue**. The box starts **unticked**. If it's left unticked, sign-in still works, but nothing is scanned (`?signin=no-inbox`, and the console says `Gmail access not granted`).
 
-**"Access blocked: Breach City has not completed the Google verification process" (Error 403: access_denied)** means that Google account isn't on the test-user list. Add it under **Google Auth Platform → Audience → Test users** and try again; it can take a minute to apply.
+**"Access blocked: BreachLink has not completed the Google verification process" (Error 403: access_denied)** means that Google account isn't on the test-user list. Add it under **Google Auth Platform → Audience → Test users** and try again; it can take a minute to apply.
 
 ## Email codes
 

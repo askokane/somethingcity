@@ -1,4 +1,4 @@
-"""Build and export the low-poly 3D Gotham ward environment for Breach City."""
+"""Build and export the low-poly 3D Gotham ward environment for BreachLink."""
 
 import math
 from pathlib import Path
@@ -9,7 +9,7 @@ import bpy
 OUT = Path(__file__).resolve().parent
 bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
-scene.name = "Breach City | Gotham Ward"
+scene.name = "BreachLink | Gotham Ward"
 scene.unit_settings.system = "METRIC"
 scene.unit_settings.scale_length = 1.0
 scene.render.engine = "BLENDER_EEVEE"
@@ -221,7 +221,7 @@ scene.world = world
 
 bpy.ops.object.camera_add(location=(24, 29, 25))
 camera = bpy.context.object
-camera.name = "Breach City Isometric Camera"
+camera.name = "BreachLink Isometric Camera"
 camera.data.type = "ORTHO"
 camera.data.ortho_scale = 48
 camera.rotation_euler = (math.radians(32), 0, math.radians(42))

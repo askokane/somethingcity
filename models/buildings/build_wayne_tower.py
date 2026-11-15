@@ -1,4 +1,4 @@
-"""Build a compact, pixel-styled Wayne Tower for the Breach City plots."""
+"""Build a compact, pixel-styled Wayne Tower for the BreachLink plots."""
 
 from pathlib import Path
 import bpy

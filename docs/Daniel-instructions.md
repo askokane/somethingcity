@@ -1,7 +1,7 @@
 ﻿# Daniel — Blender Account Building Instructions
 
 ## Mission
-Own the account-building models for Breach City. Each monitored account maps to one reusable building, and the app changes its appearance to reflect the account's breach-check status. Tai owns streets, NPCs, supporting city elements, and UI visual design/assets; Atharva owns frontend implementation.
+Own the account-building models for BreachLink. Each monitored account maps to one reusable building, and the app changes its appearance to reflect the account's breach-check status. Tai owns streets, NPCs, supporting city elements, and UI visual design/assets; Atharva owns frontend implementation.
 
 ## Step-by-step prompting workflow
 Use these prompts in order, carrying forward the conventions agreed with Tai and Atharva:

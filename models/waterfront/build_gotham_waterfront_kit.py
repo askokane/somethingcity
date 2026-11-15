@@ -2,7 +2,7 @@
 
 Local model coordinates use X across the shore, Y up and positive Z offshore.
 The gallery is editable in Blender; the GLB contains named origin-root
-prototypes for placement in the Breach City Three.js scene.
+prototypes for placement in the BreachLink Three.js scene.
 """
 import bpy, math
 from pathlib import Path
