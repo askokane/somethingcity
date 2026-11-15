@@ -7,9 +7,10 @@ import { BEACH_SET_OUT as QUAY_OUT } from './coastal-plan.js'; // the widened sh
 
 export async function createCoastalScene() {
   const loader = new GLTFLoader();
-  const [gltf, waterfrontGltf] = await Promise.all([
+  const [gltf, waterfrontGltf, cargoPortGltf] = await Promise.all([
     loader.loadAsync('./models/everything-else/gotham_coastal_kit.glb'),
     loader.loadAsync('./models/waterfront/gotham_waterfront_kit.glb'),
+    loader.loadAsync('./models/everything-else/gotham_cargo_port.glb').catch((error) => { console.warn('Could not load the cargo port cranes:', error); return null; }),
   ]);
   const group = new THREE.Group(); group.name = 'Blender coastal districts';
   function prototype(name) {
@@ -18,7 +19,9 @@ export async function createCoastalScene() {
     if (!found) throw new Error(`Coastal asset missing: ${name}`);
     return found;
   }
+  const PROP_SCALE = { Coast_Bench: 0.5, Lifeguard_Hut: 0.6 }; // the coastal kit's bench and hut were twice life size
   function place(name, x, y, z, rotation = 0, scale = 1) {
+    scale *= PROP_SCALE[name] ?? 1;
     const root = prototype(name).clone(true);
     root.position.set(x,y,z); root.rotation.y = rotation; root.scale.setScalar(scale);
     root.traverse(node => { if (node.isMesh) { node.castShadow = name !== 'Beach_Sand_Patch'; node.receiveShadow = true; } });
@@ -30,6 +33,17 @@ export async function createCoastalScene() {
     if (!found) throw new Error(`Waterfront asset missing: ${name}`);
     return found;
   }
+  // The cargo port's two quayside cranes (and the container hanging from one), lifted out of Tai's port scene as a pair:
+  // centred along the quay, rail feet on y 0, the quay edge at z 0 and the booms reaching out over the water along +Z.
+  const quayCranes = (() => {
+    if (!cargoPortGltf) return null;
+    const pair = new THREE.Group();
+    for (const node of [...cargoPortGltf.scene.children]) if (/^(Crane_|Loading_Container_)/.test(node.name)) pair.add(node.clone(true));
+    const bounds = new THREE.Box3().setFromObject(pair);
+    pair.children.forEach((node) => { node.position.x = (node.position.x - (bounds.min.x + bounds.max.x) / 2) * 0.6; node.position.y -= bounds.min.y; }); // 0.6: the pair closer together
+    return pair;
+  })();
+  const QUAY_CRANE_SCALE = 0.85; // ~13.6 tall (~32 m), booms ~10 over the water, the pair ~5 either side of centre
   function placeWaterfront(name,x,y,z,rotation=0,scale=1) {
     const model=waterfrontPrototype(name).clone(true);
     model.name=name; model.position.set(x,y,z); model.rotation.y=rotation; model.scale.setScalar(scale);
@@ -78,6 +92,46 @@ export async function createCoastalScene() {
     lighthouse = placeWaterfront('Lighthouse_North_Head', lx, 3.0, lz); // on top of the central rock
   }
   const sweep = lighthouse?.getObjectByName('Lighthouse_Beam_Sweep');
+  // The lamp: a warm point light washing the rocks and water round the tower, and a soft glow on the lantern.
+  let lamp = null, glow = null, beams = null;
+  if (lighthouse) {
+    lighthouse.updateMatrixWorld(true);
+    const top = new THREE.Box3().setFromObject(lighthouse);
+    const at = new THREE.Vector3((top.min.x + top.max.x) / 2, top.max.y - (top.max.y - top.min.y) * 0.22, (top.min.z + top.max.z) / 2);
+    lamp = new THREE.PointLight('#ffd27a', 16, 40, 1.2); // steady
+    lamp.position.copy(at);
+    group.add(lamp);
+    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 64;
+    const ctx = canvas.getContext('2d'), gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    gradient.addColorStop(0, 'rgba(255,240,190,1)'); gradient.addColorStop(0.35, 'rgba(255,200,110,0.55)'); gradient.addColorStop(1, 'rgba(255,170,60,0)');
+    ctx.fillStyle = gradient; ctx.fillRect(0, 0, 64, 64);
+    const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
+    glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, transparent: true })); // shines through the lantern glass
+    glow.position.copy(at); glow.scale.setScalar(4);
+    glow.raycast = () => {};
+    group.add(glow);
+    // The beam: one cone of light from the lantern, sweeping round like a real lighthouse's: a soft inner shaft inside a
+    // fainter, wider one, fading out along its length (vertex alpha), additive so it glows.
+    beams = new THREE.Group();
+    beams.position.copy(at);
+    const cone = (length, radius, opacity) => {
+      const geometry = new THREE.ConeGeometry(radius, length, 24, 1, true);
+      geometry.translate(0, -length / 2, 0); // apex at the lantern
+      geometry.rotateZ(Math.PI / 2); // pointing along +X
+      const position = geometry.attributes.position, alpha = new Float32Array(position.count * 4);
+      for (let i = 0; i < position.count; i++) {
+        const fade = 1 - Math.min(1, position.getX(i) / length); // bright at the lantern, gone at the far end
+        alpha.set([1, 0.86, 0.55, fade * fade], i * 4);
+      }
+      geometry.setAttribute('color', new THREE.BufferAttribute(alpha, 4));
+      const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+      mesh.name = 'Lighthouse_rotating_light_beam_cone'; // the static batching below skips these, so they keep turning
+      mesh.raycast = () => {};
+      return mesh;
+    };
+    beams.add(cone(34, 3.2, 0.32), cone(40, 6, 0.12));
+    group.add(beams);
+  }
 
   // Stevensburgh Strand (Downtown's south beach) gets the beach activity and the kiosk.
   const south = beaches.find((b) => b.name === 'Stevensburgh Strand');
@@ -103,13 +157,19 @@ export async function createCoastalScene() {
     const out = (d) => face + side * d; // d > 0: further offshore
     const offshore = side > 0 ? Math.PI / 2 : -Math.PI / 2; // turns the kit's +Z toward the sea
     const k = PORT_SCALE;
-    // The cargo crane on the crane block, its boom reaching over the quay to the barge's berth.
-    placeWaterfront('Gantry_Crane_Haysville', crane.x + side * 1.6, .23, crane.z, side > 0 ? 0 : Math.PI, k);
+    // The quay cranes on the crane block: rail feet on the quay deck, booms out over the barge's berth.
+    if (quayCranes) {
+      const cranes = quayCranes.clone(true);
+      cranes.name = 'Gotham_Quay_Cranes';
+      cranes.position.set(crane.quay, .08, crane.z); cranes.rotation.y = crane.yaw; cranes.scale.setScalar(QUAY_CRANE_SCALE);
+      cranes.traverse((node) => { if (node.isMesh) { node.castShadow = true; node.receiveShadow = true; } });
+      waterfrontGroup.add(cranes);
+    }
     placeWaterfront('Warehouse_Haysville_Docks', dock.x - side * 2.4, .23, dock.z - 1, Math.PI / 2, k);
     placeWaterfront('Container_Rust', dock.x + side * .4, .23, dock.z - 2.6, 0, k);
     placeWaterfront('Container_Teal', dock.x + side * .4, .23 + 2.6 * k, dock.z - 2.6, 0, k);
     placeWaterfront('Container_Slate', dock.x + side * .4, .23, dock.z + 3.2, 0, k);
-    for (const dz of [-3.5, -1.2, 1.2, 3.5]) placeWaterfront('Harbor_Bollard', out(-.35), .08, crane.z + dz, 0, .9);
+    for (const dz of [-3.5, -1.2, 1.2, 3.5]) placeWaterfront('Harbor_Bollard', out(-.35), .08, crane.z + dz, 0, .45);
     placeWaterfront('Breakwater_Harbor_Light', out(.2), -.28, crane.z + 9.5, offshore, k);
   }
   // Container yards: stacks of the kit's containers (1-3 high) in two banks either side of a centre aisle.
@@ -121,10 +181,12 @@ export async function createCoastalScene() {
       for (let level = 0; level < height; level++) placeWaterfront(kinds[(n + level) % 3], yard.x + dx, .23 + level * .98, yard.z + dz, 0, PORT_SCALE);
       n++;
     }
+    // The old gantry crane stands over the stacks, its beam spanning all three banks.
+    placeWaterfront('Gantry_Crane_Haysville', yard.x, .23, yard.z, 0, PORT_SCALE).scale.set(PORT_SCALE, 0.55, 0.45); // ~19 m tall, same span
   }
   // Ace Chemicals' shore: a line of bollards (the landmark fills its block, so no containers).
   const ace = blocks.find((b) => b.format === 'landmark' && b.district === 'Haysville');
-  if (ace) for (const dz of [-4, 0, 4]) placeWaterfront('Harbor_Bollard', ace.x + 5.6 + QUAY_OUT, .23, ace.z + dz, 0, 1.05);
+  if (ace) for (const dz of [-4, 0, 4]) placeWaterfront('Harbor_Bollard', ace.x + 5.6 + QUAY_OUT, .23, ace.z + dz, 0, .5);
 
   // Consolidate the static waterfront set by material while retaining the
   // lighthouse beam and all named scene roots for animation and inspection.
@@ -146,12 +208,20 @@ export async function createCoastalScene() {
   }
   staticMeshes.forEach(mesh=>mesh.parent.remove(mesh));
   waterfrontGroup.userData.renderBatches=staticBatches.size;
-  waterfrontGroup.userData.update=time=>{if(sweep) sweep.rotation.y=time*.36;};
-  waterfrontGroup.userData.namedAssets=['Lighthouse_North_Head','Fishing_Pier_People','Breakwater_Harbor_Light','Gantry_Crane_Haysville'];
+  waterfrontGroup.userData.update=time=>{
+    if(sweep) sweep.rotation.y=time*.36;
+    // Brightest each time the beam swings round toward the camera.
+    if(lamp){
+      const angle=time*.63; // one turn about every ten seconds
+      beams.rotation.y=angle;
+    }
+  };
+  waterfrontGroup.userData.namedAssets=['Lighthouse_North_Head','Fishing_Pier_People','Breakwater_Harbor_Light','Gantry_Crane_Haysville','Gotham_Quay_Cranes'];
   group.userData.update=time=>waterfrontGroup.userData.update(time);
   for (const b of blocks) {
     if (b.format === 'market') for (const dx of [-8,-4,0,4,8]) for (const dz of [-3.1,3.1]) place('Market_Stall', b.x + dx, .23, b.z + dz, dz < 0 ? Math.PI : 0);
-    if (b.format === 'garden') for (const dx of [-6,6]) place('Coast_Bench', b.x + dx, .23, b.z + 1.1, Math.PI);
+    // Inside the park (a one-block park is only 9 wide: at ±6 the benches hung over the street).
+    if (b.format === 'garden') for (const dx of [-1, 1]) place('Coast_Bench', b.x + dx * Math.min(6, b.width / 2 - 1.4), .23, b.z + 1.1, Math.PI);
     if (b.format === 'plaza') {
       place('Plaza_Fountain', b.x, .23, b.z);
       for (const dx of [-3.5,3.5]) place('Coast_Bench', b.x + dx, .23, b.z + (dx < 0 ? 1.9 : -1.9), dx < 0 ? Math.PI / 2 : -Math.PI / 2); // beside the paths, facing the fountain

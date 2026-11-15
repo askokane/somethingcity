@@ -121,6 +121,7 @@ function loadModel(path) {
 
 const propAxisCorrection = new Map([
   ['Gotham_Crosswalk', -Math.PI / 2],
+  ['Gotham_Barbed_Wire_1', Math.PI / 2], // Tai's barbed wire module: height along -Z
   // Tai's sidewalk kit stores its height along -Z (top face at z -0.23), so +90 degrees about X stands it on the street.
   ['Gotham_Sidewalk_Straight', Math.PI / 2],
   ['Gotham_Sidewalk_Corner', Math.PI / 2],
@@ -411,7 +412,7 @@ function addPark(cx, cz, half, { seed = 1, lawn = true, paths = false, trees = 2
   for (let i = 0; i < bigTrees; i++) place(parkKit.largeTree, between(6, 11.5), 0.9, 0.8);
   for (let i = 0; i < trees; i++) place(parkKit.streetTree, between(2.2, 7.5), 0.35, 0.45);
   for (let i = 0; i < bushes; i++) {
-    const [model, height] = [[parkKit.compact, between(0.45, 1.3)], [parkKit.hedge, between(0.6, 1.3)], [parkKit.tall, between(1.1, 2.4)]][Math.floor(random() * 3)];
+    const [model, height] = [[parkKit.compact, between(0.4, 1.0)], [parkKit.hedge, between(0.5, 1.1)], [parkKit.tall, between(0.9, 1.3)]][Math.floor(random() * 3)];
     place(model, height, 0.2, 0.22);
   }
   return batchPlaced(roots);
@@ -456,6 +457,7 @@ function syncPlotParks() {
     instanceModel(model, ACCOUNT_FOOTPRINT / Math.max(size.x, size.z), plots, favelaGroup); // fits the plot, keeps its shape
   });
   flickerWindows(favelaGroup);
+  placeBillboards();
   if (!parkKit) return;
   // Plazas (Founders Square): a walled green with the fountain and its benches left in a clearing.
   blocks.filter((b) => b.format === 'plaza').forEach((b, i) => {
@@ -473,7 +475,7 @@ function syncPlotParks() {
 }
 
 async function addCityProps(environment) {
-  const names = ['gotham_bushes', 'gotham_crosswalk', 'gotham_sidewalks', 'gotham_fire_hydrant', 'gotham_lamppost', 'gotham_large_tree', 'gotham_park_wall', 'gotham_stoplight', 'gotham_street_tree'];
+  const names = ['gotham_barbed_wire', 'gotham_bushes', 'gotham_crosswalk', 'gotham_sidewalks', 'gotham_fire_hydrant', 'gotham_lamppost', 'gotham_large_tree', 'gotham_park_wall', 'gotham_stoplight', 'gotham_street_tree'];
   const loaded = await Promise.all(names.map(async (name) => {
     try { return [name, await loadModel(`./models/everything-else/${name}.glb`)]; }
     catch (error) { console.warn(`Could not load ${name}:`, error); return [name, null]; }
@@ -550,22 +552,34 @@ async function addCityProps(environment) {
     // extension's rock base, so they are stretched a little taller to meet the pavement level.
     const SHORE_S = 0.8 / 1.5, SHORE_LENGTH = 3 * SHORE_S, TALL = (0.23 - 0.02) / 0.16;
     const shoreStraights = new Map();
-    // Bridge roads cross the shore street onto the deck: no sidewalk piece where one passes, or cars drive over it.
+    // Bridge roads cross the shore street onto the deck: each band is split around them (the road's width and no more,
+    // so the sidewalk runs right up to the bridge end) and each part filled with pieces stretched to fit it.
     const bridgeRoads = [...roadGraph.values()].flatMap((n) => (n.key.startsWith('b') ? [...n.links.keys()].map((key) => [n, roadGraph.get(key)]) : []));
     const onBridgeRoad = (x, z, reach) => bridgeRoads.some(([a, b]) => {
       const dx = b.x - a.x, dz = b.z - a.z, t = Math.max(0, Math.min(1, ((x - a.x) * dx + (z - a.z) * dz) / (dx * dx + dz * dz || 1)));
       return Math.hypot(a.x + dx * t - x, a.z + dz * t - z) < reach;
     });
+    const ROAD_HALF = 1.6, STEP = 0.05;
     for (const band of shoreSidewalks) {
-      const n = Math.max(1, Math.round(band.length / SHORE_LENGTH));
-      const key = (band.length / (n * SHORE_LENGTH)).toFixed(3);
-      if (!shoreStraights.has(key)) shoreStraights.set(key, []);
-      for (let i = 0; i < n; i++) {
-        const t = -band.length / 2 + (i + 0.5) * band.length / n;
-        if (onBridgeRoad(band.vertical ? band.x : band.x + t, band.vertical ? band.z + t : band.z, 1.5 + SHORE_LENGTH / 2)) continue;
-        shoreStraights.get(key).push(band.vertical
-          ? [band.x, 0.02, band.z + t, straightYaw(-band.outward, 0)]
-          : [band.x + t, 0.02, band.z, straightYaw(0, -band.outward)]);
+      const at = (t) => (band.vertical ? [band.x, band.z + t] : [band.x + t, band.z]);
+      const half = band.length / 2, parts = [];
+      let start = null;
+      for (let t = -half; t <= half + 1e-6; t += STEP) {
+        const open = !onBridgeRoad(...at(t), ROAD_HALF);
+        if (open && start === null) start = t;
+        if (!open && start !== null) { parts.push([start, t]); start = null; }
+      }
+      if (start !== null) parts.push([start, half]);
+      for (const [from, to] of parts) {
+        const length = to - from;
+        if (length < 0.2) continue;
+        const n = Math.max(1, Math.round(length / SHORE_LENGTH));
+        const key = (length / (n * SHORE_LENGTH)).toFixed(3);
+        if (!shoreStraights.has(key)) shoreStraights.set(key, []);
+        for (let i = 0; i < n; i++) {
+          const [x, z] = at(from + (i + 0.5) * length / n);
+          shoreStraights.get(key).push([x, 0.02, z, band.vertical ? straightYaw(-band.outward, 0) : straightYaw(0, -band.outward)]);
+        }
       }
     }
     for (const [stretch, list] of shoreStraights) instanceModel(kitStraight, [SHORE_S, SHORE_S * Number(stretch), TALL], list, furniture);
@@ -573,9 +587,37 @@ async function addCityProps(environment) {
   // Crosswalks across every street just outside each intersection, where the walking network crosses. The paint's bars
   // run along its local x (the traffic direction for a street along x) and repeat across the street.
   if (props.gotham_crosswalk) instanceModel(props.gotham_crosswalk, [1 / 2.9, 2.9 / 2.52, 1], crossings.map(([x, z, yaw]) => [x, 0.075, z, yaw]), furniture);
-  if (props.gotham_lamppost) instanceModel(props.gotham_lamppost, scaleForHeight(props.gotham_lamppost, 4.5), offBeach(lamps), furniture);
-  if (props.gotham_fire_hydrant) instanceModel(props.gotham_fire_hydrant, scaleForHeight(props.gotham_fire_hydrant, 0.8), offBeach(hydrants), furniture);
-  if (props.gotham_stoplight) instanceModel(props.gotham_stoplight, scaleForHeight(props.gotham_stoplight, 4), offBeach(signals), furniture);
+  if (props.gotham_lamppost) instanceModel(props.gotham_lamppost, scaleForHeight(props.gotham_lamppost, 3.5), offBeach(lamps), furniture);
+  if (props.gotham_fire_hydrant) instanceModel(props.gotham_fire_hydrant, scaleForHeight(props.gotham_fire_hydrant, 0.35), offBeach(hydrants), furniture);
+  if (props.gotham_stoplight) instanceModel(props.gotham_stoplight, scaleForHeight(props.gotham_stoplight, 2.6), offBeach(signals), furniture);
+  // Barbed wire (Tai's 1.8 m module): all the way round Arkham Asylum's block, and along two or three sides of about a
+  // third of the favela blocks. It runs just inside each block's sidewalk ring, so the sidewalks stay walkable.
+  if (props.gotham_barbed_wire) {
+    const wire = props.gotham_barbed_wire;
+    const WIRE_SCALE = 0.9, module = 1.8 * WIRE_SCALE; // ~0.9 tall (2 m), 1.6 long
+    const runs = [];
+    const fence = (b, sides, inset = 0.65) => {
+      const hw = b.width / 2 - inset, hd = b.depth / 2 - inset;
+      const lines = { n: [b.x - hw, b.z - hd, b.x + hw, b.z - hd], s: [b.x - hw, b.z + hd, b.x + hw, b.z + hd], w: [b.x - hw, b.z - hd, b.x - hw, b.z + hd], e: [b.x + hw, b.z - hd, b.x + hw, b.z + hd] };
+      for (const side of sides) {
+        const [x1, z1, x2, z2] = lines[side];
+        const n = Math.ceil(Math.hypot(x2 - x1, z2 - z1) / module); // modules overlap a touch rather than leave a gap
+        for (let i = 0; i < n; i++) {
+          const t = (i + 0.5) / n;
+          runs.push([x1 + (x2 - x1) * t, 0.23, z1 + (z2 - z1) * t, x1 === x2 ? Math.PI / 2 : 0]);
+        }
+      }
+    };
+    const arkham = landmarks.find((l) => l.name === 'Arkham Asylum');
+    if (arkham) fence(blocks[arkham.block], ['n', 's', 'e', 'w'], 0.3); // on the sidewalk: the asylum fills its plot, and the island is closed
+    const random = seededRandom(6661);
+    blocks.filter((b) => ['standard', 'terrace', 'courtyard'].includes(b.format) && (FAVELA_ISLANDS.has(b.island) || SLUMS.has(b.district))).forEach((b) => {
+      if (random() > 0.35) return;
+      const sides = ['n', 's', 'e', 'w'].sort(() => random() - 0.5).slice(0, random() < 0.5 ? 2 : 3);
+      fence(b, sides);
+    });
+    instanceModel(wire, WIRE_SCALE, runs, furniture);
+  }
   // Daniel's four favela variants fill empty plots (syncPlotParks).
   favelaModels = (await Promise.all(['gotham_favela_8bit', 'gotham_favela_02_8bit', 'gotham_favela_03_8bit', 'gotham_favela_04_8bit']
     .map((name) => loadModel(`./models/buildings/${name}.glb`).catch(() => null)))).filter(Boolean);
@@ -607,8 +649,8 @@ const landmarkRoots = [];
 // line both sides of each street, facing it, and a row faces the street along the south end. The middle of the
 // neighbourhood is a walled park either side of the spine (the city parks' builder: winding paths, mixed trees,
 // bushes, lawn patches); gravel footpaths run between the back gardens and wind through the south green. Not clickable.
-const HOUSE_SCALE = 0.25; // 2.47 x 2.23 units, ~2.2 tall
-const HOUSE_HALF = [1.24, 1.12]; // half width (along the road), half depth
+const HOUSE_SCALE = 0.3; // 2.97 x 2.67 units, ~2.6 tall (about 6 m)
+const HOUSE_HALF = [1.48, 1.34]; // half width (along the road), half depth
 async function buildSuburbs() {
   const house = await loadModel('./models/buildings/suburban_house_8bit.glb').catch(() => loadedBuildingModels?.towers?.[0]);
   const group = new THREE.Group();
@@ -648,7 +690,7 @@ async function buildSuburbs() {
   for (const b of blocks.filter((block) => block.format === 'suburb')) {
     const top = b.z - b.depth / 2, bottom = b.z + b.depth / 2, half = b.width / 2;
     const inner = half - SIDEWALK; // inside the block's own sidewalk ring
-    const SPINE = 1.5, STUB = 1, ROW = 9.6;
+    const SPINE = 1.5, STUB = 1, ROW = 10;
     const across = STUB + SIDEWALK + 0.6 + HOUSE_HALF[1]; // house centre from its cul-de-sac's centreline
     const rows = [0, 1, 3, 4].map((k) => top + 4.5 + k * ROW); // row 0 lines up with the river bridge (cellZ(7)); row 2 is the park
     // Spine: full depth, meeting the streets at both ends, with lane dashes; sidewalks both sides, open at each mouth.
@@ -670,7 +712,7 @@ async function buildSuburbs() {
         for (const s of k === 0 ? [1] : [-1, 1]) {
           sidewalk(b.x + side * (SPINE + SIDEWALK), z + s * (STUB + SIDEWALK / 2), b.x + side * inner, z + s * (STUB + SIDEWALK / 2), 0, -s);
           // Five houses a side, facing the street (row 0 only on its south side: the block's edge is too close).
-          for (const along of [3.6, 6.3, 9, 11.7, 14.4]) home(b.x + side * along, z + s * across, 0, -s);
+          for (const along of [3.8, 6.9, 10, 13.1]) home(b.x + side * along, z + s * across, 0, -s);
         }
         if (k === 0) sidewalk(b.x + side * (SPINE + SIDEWALK), z - STUB - SIDEWALK / 2, b.x + side * inner, z - STUB - SIDEWALK / 2, 0, 1);
       }
@@ -691,7 +733,7 @@ async function buildSuburbs() {
     }
     // The south end: a row of houses facing the street, behind a green with a winding footpath.
     const southZ = bottom - SIDEWALK - 0.5 - HOUSE_HALF[1];
-    for (const side of [-1, 1]) for (const along of [3.6, 6.3, 9, 11.7, 14.4]) home(b.x + side * along, southZ, 0, 1);
+    for (const side of [-1, 1]) for (const along of [3.8, 6.9, 10, 13.1]) home(b.x + side * along, southZ, 0, 1);
     const greenTop = rows.at(-1) + across + HOUSE_HALF[1] + 0.2, greenBottom = southZ - HOUSE_HALF[1] - 0.2;
     const mid = (greenTop + greenBottom) / 2, sway = (greenBottom - greenTop) * 0.28;
     for (const side of [-1, 1]) {
@@ -759,23 +801,41 @@ async function buildSuburbs() {
 // it (the sea shader's height formula, copied below) and moves the way its motion hint describes: fishing boats drift,
 // beach boats sit moored, the tug and the GCPD patrol run circuits, the ferry and the barge shuttle, and the container
 // ship passes slowly on the horizon.
+// A rectangle round every island, `margin` out from the outermost land, for a ship to lap (corners rounded by the route).
+function coastLoop(margin) {
+  const [x1, x2] = [Math.min(...islands.map((i) => i.minX)) - margin, Math.max(...islands.map((i) => i.maxX)) + margin];
+  const [z1, z2] = [Math.min(...islands.map((i) => i.minZ)) - margin, Math.max(...islands.map((i) => i.maxZ)) + margin];
+  return [[x1, z1], [x2, z1], [x2, z2], [x1, z2]];
+}
 const SHIPS = [
-  { file: 'horizon_container_ship_narrows', mode: 'pass', from: [150, -230], to: [150, 230], speed: 1.6 },
-  { file: 'gcpd_harbor_patrol', mode: 'loop', centre: [-18, -6], radius: [160, 160], speed: 5 }, // clears every corner of the map
-  { file: 'tugboat_east_quay', mode: 'loop', centre: [108, 0], radius: [8, 16], speed: 2.2 }, // clear of the cargo lane
+  { file: 'horizon_container_ship_narrows', mode: 'pass', from: [150, -230], to: [150, 230], speed: 1.6, scale: 2.5 }, // a real ocean-going ship (~160 m), far offshore
+  // A tug on the run: racing round the island on its own lane (inside the ferry's), weaving hard like it's dodging the
+  // GCPD. Five harbor patrol boats chase it in a staggered pack along its wake.
+  { file: 'tugboat_east_quay', id: 'fugitive', mode: 'route', closed: true, points: coastLoop(24), speed: 15, weave: 5.5, jumps: true, scale: 1.3 },
+  // Each chaser: how far back (lag) and to which side it runs, how hard and how fast it weaves, how much it surges and
+  // drops back, and how it drifts across lanes, so the pack never moves in lockstep.
+  ...[
+    { lag: 20, side: 0, weave: 1.6, rate: 1.9, surge: 5, drift: 1.5 },
+    { lag: 30, side: -4, weave: 2.4, rate: 1.1, surge: 7, drift: 2 },
+    { lag: 38, side: 3.5, weave: 1.2, rate: 2.6, surge: 4, drift: 2.5 },
+    { lag: 48, side: -2, weave: 2.2, rate: 1.4, surge: 8, drift: 1.8 },
+    { lag: 58, side: 4.5, weave: 1.8, rate: 0.9, surge: 6, drift: 2.2 },
+  ].map((chase) => ({ file: 'gcpd_harbor_patrol', mode: 'chase', target: 'fugitive', scale: 0.65, ...chase })), // ~12 m patrol launches
   // Cargo barge between the two ports: Haysville Docks' berth (east shore), out to sea, south of South Hinkley (no
   // bridges to pass under), up the channel east of Bristol to West Harlow Docks' berth (west shore). Each berth is off
   // the crane block's quay, bow-in under the crane's boom, with the breakwater to the south. Corners are rounded into arcs.
-  { file: 'cargo_barge_gotham_river', mode: 'route', points: [[100.5, 50], [108, 50], [108, 117], [-85, 117], [-85, 60], [-76.5, 60]], speed: 2.4 },
-  { file: 'bristol_midtown_ferry', mode: 'shuttle', from: [-84, 12], to: [-36, 12], speed: 2.4 }, // lower inlet, west of the bridge
+  { file: 'cargo_barge_gotham_river', mode: 'route', points: [[100.5, 50], [104, 50], [104, 117], [-85, 117], [-85, 60], [-76.5, 60]], speed: 2.4 },
+  // The ferry laps the whole island's outer coast (every bridge is inside the loop, so it never passes under one), wide
+  // of the moored and drifting boats, the tug's circuit and the barge's lane.
+  { file: 'bristol_midtown_ferry', mode: 'route', closed: true, points: coastLoop(40), speed: 3.5 },
   { file: 'cargo_barge_gotham_river', mode: 'shuttle', from: [-76, -104], to: [-76, -40], speed: 1.4 }, // Gotham River, north of the bridges
-  { file: 'fishing_trawler_narrows', mode: 'drift', at: [118, -62], heading: 2.2 },
+  { file: 'fishing_trawler_narrows', mode: 'drift', at: [-192, -40], heading: 2.2 }, // out past the chase and ferry lanes, clear of the container ship
   { file: 'fishing_longliner_crown_point', mode: 'drift', at: [102, -104], heading: 0.6 },
-  { file: 'fishing_skiff_blackgate', mode: 'drift', at: [-66, 129], heading: -0.9 },
-  { file: 'sailboat_west_bay', mode: 'moored', at: [-60, -38], heading: Math.PI / 2 }, // off Reatton Beach
+  { file: 'fishing_skiff_blackgate', mode: 'drift', at: [-66, 164], heading: -0.9, scale: 0.55 }, // out past the chase and ferry lanes
+  { file: 'sailboat_west_bay', mode: 'moored', at: [-60, -38], heading: Math.PI / 2, scale: 0.7 }, // off Reatton Beach
   { file: 'schooner_west_bay', mode: 'moored', at: [-64, -60], heading: 0.3 },
-  { file: 'rowboat_beach_cove', mode: 'moored', at: [4, 80], heading: 1.2 }, // off Stevensburgh Strand
-  { file: 'rowboat_blackgate_cove', mode: 'moored', at: [-10, 92], heading: -0.4 }, // South Hinkley
+  { file: 'rowboat_beach_cove', mode: 'moored', at: [4, 80], heading: 1.2, scale: 0.45 }, // off Stevensburgh Strand
+  { file: 'rowboat_blackgate_cove', mode: 'moored', at: [-10, 92], heading: -0.4, scale: 0.45 }, // South Hinkley
 ];
 const SHIP_DRAFT = 0.3; // how far each hull sits below the surface
 // Height of the sea surface at (x, z): the same formula as stylized-sea.js's vertex shader.
@@ -897,16 +957,34 @@ async function launchShips() {
   await Promise.all(SHIPS.map(async (spec, i) => {
     const model = await loadModel(`./models/ships/${spec.file}.glb`).catch(() => null);
     if (!model) return;
-    const anchor = spec.at ?? spec.from ?? spec.centre ?? spec.points[0];
+    const anchor = spec.at ?? spec.from ?? spec.centre ?? spec.points?.[0] ?? [0, 0];
     if (spec.at && isOnLand(spec.at[0], spec.at[1], -2.5)) { console.warn(`${spec.file} would sit on land; skipped`); return; }
     model.rotation.order = 'YXZ';
     model.scale.setScalar(spec.scale ?? 1);
     model.traverse((node) => { if (node.isMesh) { node.castShadow = false; node.receiveShadow = true; } }); // moving: no shadow (static shadow map)
     group.add(model);
+    let beacons = null;
+    if (spec.mode === 'chase') {
+      beacons = { red: [], blue: [], glows: [], flash: i * 0.61 };
+      model.updateMatrixWorld(true);
+      model.traverse((node) => {
+        const colour = /red_beacon/i.test(node.name) ? 'red' : /blue_beacon/i.test(node.name) ? 'blue' : null;
+        if (!colour || !node.isMesh) return;
+        node.material = new THREE.MeshBasicMaterial();
+        beacons[colour].push(node.material);
+        const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: beaconGlowTexture, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+        glow.position.copy(model.worldToLocal(new THREE.Box3().setFromObject(node).getCenter(new THREE.Vector3())));
+        glow.scale.setScalar(2.2);
+        glow.userData.colour = colour;
+        model.add(glow);
+        beacons.glows.push(glow);
+      });
+    }
     const length = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3()).x;
     let curve = null;
     if (spec.points) { // straight legs joined by quadratic arcs (radius up to 10)
-      const pts = spec.points.map(([x, z]) => new THREE.Vector3(x, 0, z));
+      let pts = spec.points.map(([x, z]) => new THREE.Vector3(x, 0, z));
+      if (spec.closed) { const mid = pts[0].clone().lerp(pts[1], 0.5); pts = [mid, ...pts.slice(1), pts[0], mid]; }
       curve = new THREE.CurvePath();
       let from = pts[0];
       for (let j = 1; j < pts.length - 1; j++) {
@@ -920,9 +998,20 @@ async function launchShips() {
       }
       curve.add(new THREE.LineCurve3(from, pts[pts.length - 1]));
     }
-    fleet.push({ ...spec, model, length, phase: i * 1.7, anchor, curve });
+    fleet.push({ ...spec, model, length, phase: i * 1.7, anchor, curve, beacons });
   }));
   initializeBoatWakes();
+}
+// Where a ship on a closed route is at `time`: along the route at its speed, pushed across it by an erratic weave
+// (three sines at odd rates, so it never settles into a rhythm).
+const beaconGlowTexture = softBlob('rgba(255,255,255,0.9)', 'rgba(255,255,255,0)');
+function lapPosition(ship, time) {
+  const u = (((time * ship.speed) / ship.curve.getLength() + ship.phase * 0.1) % 1 + 1) % 1;
+  const p = ship.curve.getPointAt(u);
+  if (!ship.weave) return [p.x, p.z];
+  const dir = ship.curve.getTangentAt(u);
+  const sway = ship.weave * (0.55 * Math.sin(time * 0.9 + ship.phase) + 0.3 * Math.sin(time * 2.3 + 1.7) + 0.15 * Math.sin(time * 4.1));
+  return [p.x - dir.z * sway, p.z + dir.x * sway];
 }
 function updateShips(time) {
   for (const ship of fleet) {
@@ -943,6 +1032,26 @@ function updateShips(time) {
       const eased = ship.mode === 'shuttle' ? t * t * (3 - 2 * t) : t; // the ferry and barge slow down at each end
       [x, z] = [x1 + (x2 - x1) * eased, z1 + (z2 - z1) * eased];
       [hx, hz] = back ? [x1 - x2, z1 - z2] : [x2 - x1, z2 - z1];
+    } else if (ship.mode === 'route' && ship.closed) {
+      // Round and round a closed route at an even speed (weaving across it when the ship has a `weave`).
+      [x, z] = lapPosition(ship, time);
+      const [nx, nz] = lapPosition(ship, time + 0.08);
+      [hx, hz] = [nx - x, nz - z];
+    } else if (ship.mode === 'chase') {
+      // On the target's own track a little behind it (its position `lag` units ago), off to one side, weaving a bit.
+      ship.quarry ??= fleet.find((other) => other.id === ship.target);
+      if (!ship.quarry) continue;
+      const at = (t) => {
+        const back = (ship.lag + Math.sin(t * 0.37 + ship.phase) * ship.surge) / ship.quarry.speed; // surging and dropping back
+        const [qx, qz] = lapPosition(ship.quarry, t - back);
+        const [ax, az] = lapPosition(ship.quarry, t - back + 0.08);
+        const len = Math.hypot(ax - qx, az - qz) || 1;
+        const sway = ship.side + Math.sin(t * 0.13 + ship.phase * 2) * ship.drift + Math.sin(t * ship.rate + ship.phase) * ship.weave;
+        return [qx - ((az - qz) / len) * sway, qz + ((ax - qx) / len) * sway];
+      };
+      [x, z] = at(time);
+      const [nx, nz] = at(time + 0.08);
+      [hx, hz] = [nx - x, nz - z];
     } else if (ship.mode === 'route') {
       // Out and back along the curve, easing in and out of each berth.
       let t = ((time * ship.speed) / ship.curve.getLength()) % 2;
@@ -967,9 +1076,31 @@ function updateShips(time) {
     const stern = seaHeight(x - fx * half, z - fz * half, time);
     const port = seaHeight(x - fz, z + fx, time);
     const starboard = seaHeight(x + fz, z - fx, time);
-    ship.model.position.set(x, (bow + stern) / 2 - SHIP_DRAFT, z);
+    // The runaway tug bounces over the swell and every few seconds launches clear of the water, nose up, then slaps down.
+    let lift = 0, pitch = 0;
+    if (ship.jumps) {
+      lift = Math.abs(Math.sin(time * 4.2)) * 0.35;
+      const CYCLE = 4.6, AIR = 1.1, cycle = Math.floor(time / CYCLE);
+      const into = time - cycle * CYCLE;
+      if (cycle % 4 !== 3 && into < AIR) { // skips every fourth so the rhythm isn't regular
+        const s = into / AIR, height = 1.4 + ((cycle * 7) % 5) * 0.3;
+        lift += 4 * height * s * (1 - s);
+        pitch = (0.5 - s) * 0.7;
+      }
+    }
+    ship.model.position.set(x, (bow + stern) / 2 - SHIP_DRAFT + lift, z);
     // Pitch with the bow and stern heights, roll with the sides, kept gentle.
-    ship.model.rotation.set(Math.atan2(port - starboard, 2) * 0.6, yaw, Math.atan2(bow - stern, ship.length) * 0.8);
+    ship.model.rotation.set(Math.atan2(port - starboard, 2) * 0.6, yaw, Math.atan2(bow - stern, ship.length) * 0.8 + pitch);
+    if (ship.beacons) {
+      const redOn = (time * 3 + ship.beacons.flash) % 2 < 1;
+      ship.beacons.red.forEach((m) => m.color.set(redOn ? '#ff2626' : '#3a0808'));
+      ship.beacons.blue.forEach((m) => m.color.set(redOn ? '#081040' : '#2f6bff'));
+      ship.beacons.glows.forEach((glow) => {
+        const on = (glow.userData.colour === 'red') === redOn;
+        glow.material.color.set(glow.userData.colour === 'red' ? '#ff2a2a' : '#2f6bff');
+        glow.material.opacity = on ? 1 : 0;
+      });
+    }
     updateBoatWake(ship, time, x, z, fx, fz);
   }
   if (wakePositionAttribute) wakePositionAttribute.needsUpdate = true;
@@ -1369,7 +1500,7 @@ async function spawnPedestrians() {
 // Next leg at a corner: away from the nearest breached tower when running; otherwise a random one that doesn't lead
 // toward one (never straight back unless it's a dead end).
 function nextStreet(npc) {
-  let options = [...npc.to.links.keys()].map((key) => walkGraph.get(key)).filter((n) => n !== npc.from);
+  let options = [...npc.to.links.keys()].map((key) => walkGraph.get(key)).filter((n) => n !== npc.from && !inCordon(n.x, n.z));
   if (!options.length) options = [npc.from];
   if (npc.running) return options.reduce((best, n) => (nearestDanger(n.x, n.z) > nearestDanger(best.x, best.z) ? n : best));
   const safe = options.filter((n) => nearestDanger(n.x, n.z) > DANGER);
@@ -1385,6 +1516,8 @@ function updatePedestrians(time) {
   cameraRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
   for (const npc of npcs) {
     let { from: a, to: b } = npc;
+    // Heading onto a cordoned sidewalk: turn back (anyone already inside walks on out).
+    if (inCordon(b.x, b.z) && !inCordon(a.x, a.z)) { [npc.from, npc.to] = [b, a]; npc.t = 1 - npc.t; [a, b] = [npc.from, npc.to]; }
     const danger = nearestDanger(a.x + (b.x - a.x) * npc.t, a.z + (b.z - a.z) * npc.t);
     if (!npc.running && danger < DANGER) {
       npc.running = true;
@@ -1430,15 +1563,25 @@ async function spawnTraffic() {
   syncIncidents();
 }
 let policeModel = null; // [cruiser, scale], kept so incidents can call in more cops
+// Arkham Asylum's island (The Narrows) is off limits to traffic: its ring streets and the bridge over to it. Any street
+// with an end on the island (the bridge's landing included) is closed for good.
+const arkhamIsland = islands.find((island) => island.name === 'The Narrows');
+const onArkhamIsland = (n) => !!arkhamIsland && n.x > arkhamIsland.minX - 2.5 && n.x < arkhamIsland.maxX + 2.5 && n.z > arkhamIsland.minZ - 2.5 && n.z < arkhamIsland.maxZ + 2.5;
+const offLimits = (a, b) => onArkhamIsland(a) || onArkhamIsland(b);
 const randomEdge = () => {
-  const walkable = [...roadGraph.values()].filter((n) => n.links.size);
+  const walkable = [...roadGraph.values()].filter((n) => n.links.size && !onArkhamIsland(n));
   const from = walkable[Math.floor(Math.random() * walkable.length)];
-  return { from, to: roadGraph.get([...from.links.keys()][Math.floor(Math.random() * from.links.size)]) };
+  const open = [...from.links.keys()].map((key) => roadGraph.get(key)).filter((n) => !offLimits(from, n));
+  return { from, to: open.length ? open[Math.floor(Math.random() * open.length)] : roadGraph.get([...from.links.keys()][0]) };
 };
 function addCar(source, scale, isCop) {
+  // The kit's cars stand side by side; centre each copy on itself (measuring the source picked up the kit's layout and
+  // put the sedans 1.25 to one side: the burgundy one on the sidewalk, the cream one in the oncoming lane).
   const body = source.clone(true);
-  const centre = new THREE.Box3().setFromObject(source).getCenter(new THREE.Vector3());
-  body.position.set(-centre.x, 0, -centre.z); // the kit's cars stand side by side; centre each one
+  body.position.set(0, 0, 0);
+  body.updateMatrixWorld(true);
+  const centre = new THREE.Box3().setFromObject(body).getCenter(new THREE.Vector3());
+  body.position.set(-centre.x, 0, -centre.z);
   const car = new THREE.Group();
   car.add(body);
   car.scale.setScalar(scale);
@@ -1483,12 +1626,67 @@ const barrierGeometry = (() => {
 const barrierMaterial = new THREE.MeshLambertMaterial({ vertexColors: true });
 const incidentGroup = new THREE.Group();
 scene.add(incidentGroup);
+// A round soft-edged texture shared by the siren pools, the breach smoke and its flames.
+function softBlob(inner, outer) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  const gradient = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gradient.addColorStop(0, inner);
+  gradient.addColorStop(1, outer);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, 64, 64);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.magFilter = THREE.NearestFilter;
+  texture.colorSpace = THREE.SRGBColorSpace; // keep the soot dark and the flames orange, not washed out
+  return texture;
+}
+const sirenPoolTexture = softBlob('rgba(255,255,255,0.55)', 'rgba(255,255,255,0)');
+const sirenPoolGeometry = new THREE.PlaneGeometry(3.4, 3.4);
+// Can the fixed isometric camera see a person standing at (x, z), or is a building in the way?
+const seeRay = new THREE.Raycaster();
+const towardCamera = new THREE.Vector3(CITY_SIZE, CITY_SIZE, CITY_SIZE * 1.04).normalize();
+function cameraSees(x, z) {
+  seeRay.set(new THREE.Vector3(x, 0.9, z), towardCamera);
+  const blockers = [...renderedBuildings.values(), ...landmarkRoots, ...(favelaGroup ? [favelaGroup] : [])];
+  return !seeRay.intersectObjects(blockers, true).length;
+}
+// Flash the cordons' lights and road glow red, then blue (incidentGroup is rebuilt by syncIncidents).
+// Tai's two officers chatting on their radios (models/everything-else/gotham_police_radio_chat.glb), one pair at each
+// cordon's camera-side corner, playing the chat on a loop. Loaded once; syncIncidents places them.
+let policeChatModel = null;
+const POLICE_HEIGHT = 1.5; // larger than road scale so they read beside the giant rooftop villains
+loadModel('./models/everything-else/gotham_police_radio_chat.glb')
+  .then((model) => { policeChatModel = model; syncIncidents(); })
+  .catch((error) => console.warn('Could not load the police radio chat:', error));
+let lastSirenTime = null;
+function updateSirens(time) {
+  const dt = lastSirenTime === null ? 0 : Math.min(0.1, time - lastSirenTime);
+  lastSirenTime = time;
+  for (const node of incidentGroup.children) {
+    node.userData.mixer?.update(dt);
+    if (node.userData.siren === undefined) continue;
+    const red = (time * 3 + node.userData.siren) % 2 < 1;
+    const colour = red ? '#ff2a2a' : '#2f6bff';
+    if (node.isLight) { node.color.set(colour); node.intensity = 6; }
+    else node.material.color.set(colour);
+  }
+}
+// The cordoned blocks ({ minX, maxX, minZ, maxZ }: the block's edge). Their four streets are closed to traffic and their
+// sidewalks to pedestrians while the breach lasts.
+let cordons = [];
+const inCordon = (x, z, pad = 0) => cordons.some((c) => x > c.minX - pad && x < c.maxX + pad && z > c.minZ - pad && z < c.maxZ + pad);
+// A street is closed when its middle lies on a cordoned block's ring of streets (1.5 out from the block's edge).
+const closedRoad = (a, b) => inCordon((a.x + b.x) / 2, (a.z + b.z) / 2, 1.6);
 function syncIncidents() {
-  incidentGroup.children.forEach((mesh) => mesh.dispose());
+  incidentGroup.children.forEach((mesh) => { mesh.dispose?.(); if (mesh.material && mesh.geometry === sirenPoolGeometry) mesh.material.dispose(); });
   incidentGroup.clear();
   const barriers = [];
   const breached = accounts.filter((account) => account.status === 'breached' && account.slot >= 0);
   const spots = [];
+  const sirens = []; // [x, z]: one flashing light per cordoned block
+  const posts = []; // [x, z, towerX, towerZ]: where each cordon's officers stand, and the tower they watch
+  cordons = [];
   for (const blockIndex of new Set(breached.map((account) => slots[account.slot].block))) {
     const cells = blocks[blockIndex].cells;
     const minX = Math.min(...cells.map((c) => c.x)) - 4.5, maxX = Math.max(...cells.map((c) => c.x)) + 4.5;
@@ -1497,11 +1695,57 @@ function syncIncidents() {
       const n = Math.max(1, Math.round(Math.hypot(x2 - x1, z2 - z1) / BARRIER_GAP));
       for (let i = 0; i <= n; i++) barriers.push(new THREE.Matrix4().makeRotationY(yaw).setPosition(x1 + (x2 - x1) * i / n, ROAD_Y, z1 + (z2 - z1) * i / n));
     };
+    cordons.push({ minX, maxX, minZ, maxZ });
     side(minX, minZ, maxX, minZ, 0); side(minX, maxZ, maxX, maxZ, 0);
     side(minX, minZ, minX, maxZ, Math.PI / 2); side(maxX, minZ, maxX, maxZ, Math.PI / 2);
     for (const account of breached.filter((a) => slots[a.slot].block === blockIndex)) {
       const slot = slots[account.slot];
       spots.push({ x: maxX + 0.8, z: slot.z, yaw: 0.35 }, { x: slot.x, z: maxZ + 0.8, yaw: Math.PI / 2 + 0.35 });
+    }
+    sirens.push([maxX + 0.8, maxZ + 0.8]); // the block's camera-side corner, between its parked cruisers
+    // Officers: the first spot along the cordon's two camera-facing streets that the camera can see (towers across the
+    // street hide most of them), else the corner.
+    const along = [];
+    for (let t = 0.15; t < 1; t += 0.14) along.push([maxX + 0.5, minZ + (maxZ - minZ) * t], [minX + (maxX - minX) * t, maxZ + 0.5]);
+    const tower = slots[breached.find((a) => slots[a.slot].block === blockIndex).slot];
+    posts.push([...(along.find(([x, z]) => cameraSees(x, z)) ?? [maxX + 0.6, maxZ + 0.6]), tower.x, tower.z]);
+  }
+  // Red/blue light washing each cordon: one point light per block (each light costs every pixel, so not one per car).
+  sirens.forEach(([x, z], i) => {
+    const light = new THREE.PointLight('#ff2a2a', 0, 14, 1.4);
+    light.position.set(x, 3.5, z);
+    light.userData.siren = i * 0.37;
+    incidentGroup.add(light);
+  });
+  if (policeChatModel) posts.forEach(([x, z, towerX, towerZ], i) => {
+    const officers = cloneSkinned(policeChatModel);
+    const raw = new THREE.Box3().setFromObject(policeChatModel).getSize(new THREE.Vector3());
+    officers.scale.setScalar(POLICE_HEIGHT / raw.y);
+    officers.rotation.y = Math.atan2(towerX - x, towerZ - z) + Math.PI; // facing the burning tower (the export faces -Z)
+    officers.position.set(x, ROAD_Y, z); // just outside the barriers
+    const mixer = new THREE.AnimationMixer(officers);
+    (policeChatModel.userData.clips ?? []).forEach((clip) => { const action = mixer.clipAction(clip).play(); action.time = (i * 1.7) % clip.duration; });
+    officers.userData.mixer = mixer;
+    officers.traverse((node) => { if (node.isMesh) node.raycast = () => {}; });
+    incidentGroup.add(officers);
+  });
+  // A soft red/blue pool on the road under every parked cruiser: additive, unlit, nearly free.
+  spots.forEach((spot, i) => {
+    const pool = new THREE.Mesh(sirenPoolGeometry, new THREE.MeshBasicMaterial({ map: sirenPoolTexture, color: '#ff2a2a', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false }));
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.set(spot.x, ROAD_Y + 0.02, spot.z);
+    pool.userData.siren = i * 0.53;
+    pool.raycast = () => {};
+    incidentGroup.add(pool);
+  });
+  for (const node of roadGraph.values()) {
+    const keys = [...node.links.keys()];
+    if (!keys.some((key) => !closedRoad(node, roadGraph.get(key)))) continue; // only where open streets meet closed ones
+    for (const key of keys) {
+      const other = roadGraph.get(key);
+      if (!closedRoad(node, other)) continue;
+      const len = Math.hypot(other.x - node.x, other.z - node.z) || 1, dx = (other.x - node.x) / len, dz = (other.z - node.z) / len;
+      for (const across of [-1, 0, 1]) barriers.push(new THREE.Matrix4().makeRotationY(Math.atan2(-dx, -dz)).setPosition(node.x + dx * 2.4 - dz * across, ROAD_Y, node.z + dz * 2.4 + dx * across));
     }
   }
   if (barriers.length) {
@@ -1548,7 +1792,7 @@ function updateTraffic(time) {
     if (carAhead || personAhead) continue;
     c.t += (c.speed * dt) / len;
     while (c.t >= 1) {
-      let options = [...c.to.links.keys()].map((key) => roadGraph.get(key)).filter((n) => n !== c.from);
+      let options = [...c.to.links.keys()].map((key) => roadGraph.get(key)).filter((n) => n !== c.from && !closedRoad(c.to, n) && !offLimits(c.to, n));
       if (!options.length) options = [c.from];
       const next = options[Math.floor(Math.random() * options.length)];
       c.t = ((c.t - 1) * len) / (Math.hypot(next.x - c.to.x, next.z - c.to.z) || 1);
@@ -1572,11 +1816,117 @@ function updateTraffic(time) {
   }
 }
 
+
+// ---- Blimp and rooftop billboards -----------------------------------------------------------------------------------
+// Tai's blimp (models/everything-else/gotham_blimp.glb, searchlight beam included) drifts slowly round the city on a
+// wide loop, nosing along its path with a gentle bob.
+const BLIMP = { scale: 2.5, height: 30, radius: [125, 95], speed: 0.012 };
+let blimp = null;
+async function launchBlimp() {
+  const model = await loadModel('./models/everything-else/gotham_blimp.glb').catch(() => null);
+  if (!model) return;
+  blimp = new THREE.Group();
+  model.scale.setScalar(BLIMP.scale);
+  model.traverse((node) => { if (node.isMesh) node.raycast = () => {}; });
+  blimp.add(model);
+  scene.add(blimp);
+}
+function updateBlimp(time) {
+  if (!blimp) return;
+  const a = time * BLIMP.speed;
+  const x = CITY_CENTER_X + Math.cos(a) * BLIMP.radius[0], z = CITY_CENTER_Z + Math.sin(a) * BLIMP.radius[1];
+  blimp.position.set(x, BLIMP.height + Math.sin(time * 0.6) * 0.6, z);
+  // Heading along the loop (its tangent); the model's nose is +Z.
+  blimp.rotation.y = Math.atan2(-Math.sin(a) * BLIMP.radius[0], Math.cos(a) * BLIMP.radius[1]);
+}
+
+// Tai's billboard frame (models/everything-else/gotham_billboard.glb) on the roofs of a few of the taller filler buildings,
+// spread across the city and turned to the camera, each display lit with its own sign: Gotham ads and breach-safety tips.
+const BILLBOARD_SIGNS = [
+  ['CHANGE YOUR', 'PASSWORDS', '#e0b13c', '#1b1f2a'],
+  ['TURN ON', '2FA', '#7fd1ff', '#10202c'],
+  ['BREACHLINK', 'CHECK YOUR EMAIL', '#ff6a3d', '#170f14'],
+  ['GOTHAM', 'GAZETTE', '#f2efe6', '#3a1418'],
+  ['ACE', 'CHEMICALS', '#9bff6a', '#14210f'],
+  ['DON\'T REUSE', 'PASSWORDS', '#ff4f6d', '#1c0f16'],
+  ['GCPD', 'SEE IT · SAY IT', '#6fa8ff', '#0f1526'],
+  ['WAYNE', 'ENTERPRISES', '#e8d8a8', '#141414'],
+];
+function signTexture([top, bottom, ink, paper]) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128; canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = paper; ctx.fillRect(0, 0, 128, 128);
+  ctx.strokeStyle = ink; ctx.lineWidth = 4; ctx.strokeRect(6, 6, 116, 116);
+  ctx.fillStyle = ink; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 30px monospace'; ctx.fillText(top, 64, 44, 112);
+  ctx.font = 'bold 21px monospace'; ctx.fillText(bottom, 64, 86, 114);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.magFilter = THREE.NearestFilter; // keeps the pixel look
+  return texture;
+}
+const BILLBOARD_COUNT = 8, BILLBOARD_SCALE = 1.9;
+let billboardModel = null, billboardGroup = null, billboardTimer = null;
+loadModel('./models/everything-else/gotham_billboard.glb').then((model) => { billboardModel = model; placeBillboards(); }).catch(() => {});
+// Re-placed whenever the filler buildings change (debounced: syncPlotParks runs in bursts while the city loads).
+function placeBillboards() {
+  clearTimeout(billboardTimer);
+  billboardTimer = setTimeout(() => {
+    if (!billboardModel || !favelaGroup) return;
+    billboardGroup?.removeFromParent();
+    billboardGroup = new THREE.Group();
+    billboardGroup.name = 'Rooftop billboards';
+    scene.add(billboardGroup);
+    // Roof heights of a seeded sample of the free plots (a ray dropped on the filler there), tallest first, spread out.
+    favelaGroup.updateMatrixWorld(true);
+    const random = seededRandom(31337), ray = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0);
+    const free = slots.map((slot, i) => ({ slot, i })).filter(({ i }) => !slotOccupants.has(i) && !landmarkSlots.has(i));
+    // Only flat roofs: five rays across the board's footprint must land within a hand's height of each other (a spire or
+    // a stepped top would leave the board floating).
+    const roofAt = (x, z) => { ray.set(new THREE.Vector3(x, 80, z), down); return ray.intersectObject(favelaGroup, true)[0]?.point.y ?? -1; };
+    const sample = free.filter(() => random() < 0.5).map(({ slot }) => {
+      const heights = [[0, 0], [1.1, 1.1], [-1.1, -1.1], [1.1, -1.1], [-1.1, 1.1]].map(([dx, dz]) => roofAt(slot.x + dx, slot.z + dz));
+      const low = Math.min(...heights), high = Math.max(...heights);
+      return low > 1 && high - low < 0.3 ? { x: slot.x, z: slot.z, y: high } : null;
+    }).filter(Boolean).sort((a, b) => b.y - a.y);
+    const picked = [];
+    for (const spot of sample) {
+      if (picked.length >= BILLBOARD_COUNT) break;
+      if (picked.some((p) => Math.hypot(p.x - spot.x, p.z - spot.z) < 30)) continue;
+      picked.push(spot);
+    }
+    // The display panel, measured once, gets a lit sign on both faces.
+    const display = [];
+    billboardModel.traverse((node) => { if (node.isMesh && /display/i.test(node.material.name)) display.push(node); });
+    billboardModel.updateMatrixWorld(true);
+    const panel = new THREE.Box3();
+    display.forEach((node) => panel.expandByObject(node));
+    const size = panel.getSize(new THREE.Vector3()), centre = panel.getCenter(new THREE.Vector3());
+    picked.forEach((spot, i) => {
+      const board = billboardModel.clone(true);
+      const material = new THREE.MeshBasicMaterial({ map: signTexture(BILLBOARD_SIGNS[i % BILLBOARD_SIGNS.length]) });
+      for (const face of [1, -1]) {
+        const sign = new THREE.Mesh(new THREE.PlaneGeometry(size.x * 0.96, size.y * 0.94), material);
+        sign.position.set(centre.x, centre.y, face > 0 ? panel.max.z + 0.01 : panel.min.z - 0.01);
+        if (face < 0) sign.rotation.y = Math.PI;
+        board.add(sign);
+      }
+      board.scale.setScalar(BILLBOARD_SCALE);
+      board.rotation.y = Math.PI / 4; // to the camera
+      board.position.set(spot.x, spot.y, spot.z);
+      board.traverse((node) => { if (node.isMesh) { node.castShadow = true; node.raycast = () => {}; } });
+      billboardGroup.add(board);
+    });
+  }, 300);
+}
+
 function finishInitialLoad() {
   if (!environmentReady || !accountModelsReady) return;
   if (!npcs.length) spawnPedestrians();
   if (!cars.length) spawnTraffic();
   if (!batRun.rider) prepareBatRun();
+  if (!blimp) launchBlimp();
   placeWayneManor();
   placeBatSignal();
   launchShips();
@@ -1608,7 +1958,7 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
   models.towers = await Promise.all(Array.from({ length: 10 }, (_, i) => loadModel(`./models/account_buildings/account_building_${String(i + 1).padStart(2, '0')}.glb`).catch(() => null)));
   // Each tower's burning ruin (same slot number), swapped in while its site is breached.
   models.destroyedTowers = await Promise.all(Array.from({ length: 10 }, (_, i) => loadModel(`./models/account_buildings/account_building_${String(i + 1).padStart(2, '0')}_destroyed.glb`).catch(() => null)));
-  models.villains = (await Promise.all(VILLAINS.map((name) => loadModel(`./models/npcs/${name}.glb`).then((model) => { model.userData.villainName = name; return model; }).catch((error) => { console.warn(`Could not load ${name}:`, error); return null; })))).filter(Boolean);
+  models.villains = (await Promise.all(VILLAINS.map((name) => loadModel(`./models/${name === GANG ? 'everything-else' : 'npcs'}/${name}.glb`).then((model) => { model.userData.villainName = name; return model; }).catch((error) => { console.warn(`Could not load ${name}:`, error); return null; })))).filter(Boolean);
   loadedBuildingModels = models;
   accounts.forEach((account) => {
     if (account.slot < 0) return;
@@ -1629,7 +1979,7 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
     const size = bounds.getSize(new THREE.Vector3());
     // Daniel's *_8bit landmarks are modeled in meters: true road scale, shrunk only to fit the block, never stretched.
     const scale = landmark.file.endsWith('_8bit.glb')
-      ? Math.min(UNITS_PER_METER, (block.width - 1.2) / size.x, (block.depth - 1.2) / size.z)
+      ? (Math.min(block.width, block.depth) - 1.2) / Math.max(size.x, size.z) // fills its plot to the sidewalk, either way round
       : landmark.name === 'Wayne Tower'
         ? Math.min(landmark.height / size.y, (Math.min(block.width, block.depth) - 1.2) / Math.max(size.x, size.z)) // even scale, fits one block
         : [(block.width - 1.2) / size.x, landmark.height / size.y, (block.depth - 1.2) / size.z];
@@ -1847,9 +2197,10 @@ function addStatusBeacon(root, status, buildingHeight = 6.5) {
 
 // Tai's villain figures (models/npcs). Riddler, Batman and Robin have no GLB export yet.
 // gotham_robber_8bit stands on the roof as a gang of three.
-const VILLAINS = ['gotham_joker', 'gotham_harley_quinn', 'gotham_penguin', 'gotham_poison_ivy', 'gotham_robber_8bit'];
-const GANG = 'gotham_robber_8bit';
-const VILLAIN_HEIGHT = meters(4.5); // larger than life, so they read from the city view
+// gotham_robber_relay (models/everything-else) is a gang of four passing the money bag along the line.
+const VILLAINS = ['gotham_joker', 'gotham_harley_quinn', 'gotham_penguin', 'gotham_poison_ivy', 'gotham_robber_relay'];
+const GANG = 'gotham_robber_relay';
+const VILLAIN_HEIGHT = meters(7.5); // well over life size, so they read from the zoomed-out city view
 
 function syncRooftopVillain(account, root) {
   if (root.userData.villain && account.status === 'breached') return; // keep the one already up there
@@ -1860,15 +2211,18 @@ function syncRooftopVillain(account, root) {
   const taken = new Set([...renderedBuildings.values()].map((other) => other.userData.villain?.userData.villainName));
   const free = villains.filter((model) => !taken.has(model.userData.villainName));
   const pick = free.length ? free[Math.floor(Math.random() * free.length)] : villains.find((model) => model.userData.villainName === GANG) ?? villains[0];
-  const villain = pick.userData.villainName === GANG ? robberGang(pick) : villainFigure(pick);
+  const villain = villainFigure(pick);
   villain.userData.mixers = villain.userData.mixers ?? [];
   villain.userData.villainName = pick.userData.villainName;
   const roofSpot = findRoofSpot(root);
   // Joker is Y-up; Harley, Penguin and Ivy were exported with height along -Z like the props, so stand them up.
   const raw = new THREE.Box3().setFromObject(villain).getSize(new THREE.Vector3());
   villain.rotation.order = 'YXZ';
-  villain.rotation.set(raw.z > raw.y ? Math.PI / 2 : 0, Math.PI / 4, 0); // face the isometric camera
-  villain.scale.setScalar(VILLAIN_HEIGHT / Math.max(raw.y, raw.z));
+  // Face the isometric camera. Harley's and Ivy's exports face the other way, so they are turned round.
+  const turn = ['gotham_harley_quinn', 'gotham_poison_ivy'].includes(villain.userData.villainName) ? Math.PI : 0;
+  villain.rotation.set(raw.z > raw.y ? Math.PI / 2 : 0, Math.PI / 4 + turn, 0);
+  // Villain height, but never wider than the roof (with a little overhang): the relay gang is a long line.
+  villain.scale.setScalar(Math.min(VILLAIN_HEIGHT / Math.max(raw.y, raw.z), ACCOUNT_FOOTPRINT * 1.15 / raw.x));
   villain.updateMatrixWorld(true);
   const bounds = new THREE.Box3().setFromObject(villain);
   const center = bounds.getCenter(new THREE.Vector3());
@@ -1882,6 +2236,9 @@ function syncRooftopVillain(account, root) {
 // so neighbours don't move in step. SkeletonUtils keeps the robber's skin bound to its own bones.
 function villainFigure(source, mixers) {
   const figure = cloneSkinned(source);
+  // A skinned mesh is culled by bounds taken once, in its rest pose; once the animation carries the body away from that
+  // pose (the relay gang runs along its line) it was culled while still on screen, leaving only the money bag.
+  figure.traverse((node) => { if (node.isSkinnedMesh) node.frustumCulled = false; });
   const mixer = new THREE.AnimationMixer(figure);
   (source.userData.clips ?? []).filter((clip) => !/walk|throw/i.test(clip.name)).forEach((clip) => {
     const action = mixer.clipAction(clip).play();
@@ -1889,18 +2246,6 @@ function villainFigure(source, mixers) {
   });
   (mixers ?? (figure.userData.mixers = [])).push(mixer);
   return figure;
-}
-
-function robberGang(robber) {
-  const gang = new THREE.Group();
-  gang.userData.mixers = [];
-  [[0, 0], [-1.5, 0.7], [1.5, 0.7]].forEach(([x, z], i) => { // robber GLB is Y-up, ~1.75 wide
-    const member = villainFigure(robber, gang.userData.mixers);
-    member.position.set(x, 0, z);
-    member.rotation.y = (i - 1) * 0.4;
-    gang.add(member);
-  });
-  return gang;
 }
 
 // Where a figure can stand: rays dropped on a grid over the middle of the building; the highest flat hit with flat
@@ -1929,6 +2274,86 @@ function findRoofSpot(root) {
   return best ?? { x: center.x, y: box.max.y, z: center.z };
 }
 
+// Smoke and sparks from a breached tower's fires, from the breached-tower look test (reference/breached-tower.js) scaled
+// from meters to city units: dark puffs that rise, lean downwind, swell and fade, then respawn; bright embers spiralling
+// up; a little flicker over each modelled fire. Lives on the tower's root, so it goes when the tower is rebuilt or cleared.
+const breachSmokeTexture = softBlob('rgba(46,42,50,0.95)', 'rgba(26,24,30,0)');
+const breachFlameTexture = softBlob('rgba(255,236,170,1)', 'rgba(255,90,20,0)');
+function addBreachFire(root) {
+  const k = UNITS_PER_METER;
+  const building = root.children[0]; // the tower only, not its villain or beacon
+  building.updateMatrixWorld(true);
+  // Sources: the ruin's own modelled fires (FX_Account_NN_Fire_N meshes, one cluster per blown-out floor), in the root's
+  // unscaled frame. A tower without them burns from the middle of its camera-facing corner.
+  const clusters = new Map();
+  building.traverse((node) => {
+    const id = node.isMesh && /Fire_(\d+)/i.exec(node.name)?.[1];
+    if (!id) return;
+    if (!clusters.has(id)) clusters.set(id, new THREE.Box3());
+    clusters.get(id).expandByObject(node);
+  });
+  const whole = new THREE.Box3().setFromObject(building), size = whole.getSize(new THREE.Vector3());
+  const sources = clusters.size
+    ? [...clusters.values()].map((box) => box.getCenter(new THREE.Vector3()).sub(root.position))
+    : [new THREE.Vector3(whole.max.x - size.x * 0.3, whole.min.y + size.y * 0.55, whole.max.z - size.z * 0.3).sub(root.position)];
+  const fire = new THREE.Group();
+  fire.name = 'breach-fire';
+  const random = seededRandom(Math.round(root.position.x * 13 + root.position.z * 7));
+  const ignore = () => {};
+  const flames = sources.flatMap((at) => Array.from({ length: 3 }, () => {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: breachFlameTexture, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+    sprite.userData.base = at.clone().add(new THREE.Vector3((random() - 0.5) * 0.8, (random() - 0.4) * 0.4, (random() - 0.5) * 0.8));
+    sprite.userData.phase = random() * 10;
+    sprite.raycast = ignore;
+    fire.add(sprite);
+    return sprite;
+  }));
+  const PUFFS = 14; // per source
+  const smoke = sources.flatMap((at) => Array.from({ length: PUFFS }, (_, i) => {
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: breachSmokeTexture, depthWrite: false, transparent: true }));
+    sprite.userData.at = at;
+    sprite.userData.life = i / PUFFS;
+    sprite.userData.drift = [(random() - 0.5) * 6, (random() - 0.5) * 6, 0.7 + random() * 0.6];
+    sprite.raycast = ignore;
+    fire.add(sprite);
+    return sprite;
+  }));
+  const EMBERS = 24; // per source
+  const emberCount = EMBERS * sources.length;
+  const emberGeometry = new THREE.BufferGeometry();
+  emberGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(emberCount * 3), 3));
+  const embers = new THREE.Points(emberGeometry, new THREE.PointsMaterial({ color: '#ffb347', size: 3, sizeAttenuation: false, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  embers.raycast = ignore;
+  embers.frustumCulled = false;
+  fire.add(embers);
+  const emberLife = Float32Array.from({ length: emberCount }, () => random());
+  fire.userData.update = (t, dt) => {
+    for (const sprite of flames) {
+      const f = 0.75 + 0.35 * Math.sin(t * 11 + sprite.userData.phase) + 0.2 * Math.sin(t * 23 + sprite.userData.phase);
+      sprite.scale.setScalar(1.1 * f);
+      sprite.position.copy(sprite.userData.base).y += f * 0.35;
+      sprite.material.opacity = 0.65 + 0.35 * f;
+    }
+    for (const sprite of smoke) {
+      sprite.userData.life = (sprite.userData.life + dt * 0.07) % 1;
+      const life = sprite.userData.life, at = sprite.userData.at;
+      const [dx, dz, grow] = sprite.userData.drift;
+      sprite.position.set(at.x + (life * 16 + dx * life + Math.sin(life * 9 + dx) * 1.5) * k, at.y + (1 + life * 30) * k, at.z + (-life * 6 + dz * life) * k);
+      sprite.scale.setScalar((2.5 + life * 13) * grow * k);
+      sprite.material.opacity = Math.min(1, life * 8) * (1 - life) * 0.85;
+    }
+    const positions = emberGeometry.attributes.position;
+    for (let i = 0; i < emberCount; i++) {
+      emberLife[i] = (emberLife[i] + dt * 0.25) % 1;
+      const life = emberLife[i], at = sources[Math.floor(i / EMBERS)];
+      positions.setXYZ(i, at.x + (Math.sin(i * 3.1 + life * 9) * 2 + life * 9) * k, at.y + life * 20 * k, at.z + Math.cos(i * 1.7 + life * 7) * 2 * k);
+    }
+    positions.needsUpdate = true;
+  };
+  root.add(fire);
+  root.userData.fire = fire;
+}
+
 function applyBuildingState(account) {
   let root = renderedBuildings.get(account.id);
   if (!root) return;
@@ -1941,6 +2366,8 @@ function applyBuildingState(account) {
     return;
   }
   syncRooftopVillain(account, root);
+  if (account.status === 'breached' && !root.userData.fire) addBreachFire(root);
+  if (account.status !== 'breached' && root.userData.fire) { root.remove(root.userData.fire); root.userData.fire = null; }
   const color = new THREE.Color(statusColors[account.status]);
   const beacon = root.userData.statusBeacon;
   if (beacon) beacon.visible = account.status !== 'breached'; // the rooftop villain marks a breach instead
@@ -2873,12 +3300,15 @@ const buildingClock = new THREE.Clock();
 function animate() {
   if (shadowFrame++ % SHADOW_REFRESH === 0) renderer.shadowMap.needsUpdate = true;
   const delta = buildingClock.getDelta();
-  renderedBuildings.forEach((root) => { root.userData.mixer?.update(delta); root.userData.villain?.userData.mixers.forEach((mixer) => mixer.update(delta)); });
+  const now = performance.now() / 1000;
+  renderedBuildings.forEach((root) => { root.userData.mixer?.update(delta); root.userData.villain?.userData.mixers.forEach((mixer) => mixer.update(delta)); root.userData.fire?.userData.update(now, Math.min(delta, 0.05)); });
+  updateSirens(now);
   city.update(performance.now() / 1000);
   updateShips(performance.now() / 1000);
   updateBatRun(performance.now() / 1000);
   updatePedestrians(performance.now() / 1000);
   updateTraffic(performance.now() / 1000);
+  updateBlimp(performance.now() / 1000);
   controls.update();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
