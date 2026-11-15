@@ -2,3 +2,11 @@ __pycache__/
 *.pyc
 *.blend1
 .preview-chrome/
+node_modules/
+.venv/
+.uv-cache/
+
+# Local configuration and credentials. Keep the documented template tracked.
+.env
+.env.*
+!.env.example

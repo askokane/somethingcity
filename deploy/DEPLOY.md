@@ -1,98 +1,146 @@
 # Deploying Breach City on Vultr
 
-One small server runs everything on one domain with HTTPS:
+This deploys the static Three.js frontend and optional Node checker on one Ubuntu server. Caddy serves the files, proxies `/api/*` and `/auth/*` to the checker, and obtains HTTPS certificates for your domain.
 
-```
-https://your-domain ──► Vultr server (Ubuntu 24.04)
-                          └─ Caddy (automatic HTTPS)
-                               ├─ /api/*, /auth/*   → checker (node server.js, localhost:8787)
-                               └─ everything else   → files in /srv/breach-city (frontend, checker/checker.js)
-```
+## 1. Create the server and point your domain
 
-The frontend and API share one origin, so there are no CORS or cookie issues. **In the frontend, set the API base to `""` (same origin) instead of `http://localhost:8787`.**
+1. In Vultr, create a **Cloud Compute** instance with **Ubuntu 24.04 LTS**. Add your SSH public key, allow SSH, HTTP, and HTTPS (ports 22, 80, and 443), and note the public IPv4 address. This server is billed by Vultr.
+2. At your DNS provider, create an **A record** for your domain (for example, `@`) pointing to that IP. If you also want `www`, create a `www` A record pointing to the same IP. Remove conflicting A/AAAA records. Wait for the records to resolve before continuing.
+3. From PowerShell, connect as root: `ssh root@SERVER_IP`.
 
-## Before you start (your accounts)
+Use the domain you actually configured everywhere below. Caddy needs working DNS and reachable ports 80 and 443 to issue HTTPS certificates.
 
-1. **Vultr:** deploy the smallest **Cloud Compute** server, Ubuntu 24.04, in a region near the event. Add your SSH key. Note its IP address. It's billed hourly, so delete it after the event.
-2. **Domain** (GoDaddy Registry, via the MLH prize code): add an **A record** pointing to the server's IP. Wait until `ping your-domain` shows that IP.
-3. **Google Cloud Console** → Google Auth Platform → **Clients** → the existing web client → add the authorized redirect URI `https://your-domain/auth/google/callback`. Keep the localhost one for local work. Under **Branding**, add your domain to authorized domains. Test users still apply.
+## 2. Install server packages
 
-## On the server (SSH in as root)
+Run these commands in the SSH session on the Vultr server:
 
 ```bash
-# 1. Firewall: SSH + web only
-ufw allow OpenSSH && ufw allow 80 && ufw allow 443 && ufw --force enable
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw --force enable
 
-# 2. Node 24 (Ubuntu's own Node is too old) and git
+apt update
+apt install -y ca-certificates curl git gnupg debian-keyring debian-archive-keyring apt-transport-https
 curl -fsSL https://deb.nodesource.com/setup_24.x | bash -
-apt install -y nodejs git
+apt install -y nodejs
 
-# 3. Caddy (official repository)
-apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-apt update && apt install -y caddy
-
-# 4. The code, run by an unprivileged user
-useradd --system --no-create-home breachcity
-git clone https://github.com/askokane/somethingcity.git /srv/breach-city
-cd /srv/breach-city/checker && npm ci --omit=dev
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' -o /etc/apt/sources.list.d/caddy-stable.list
+apt update
+apt install -y caddy
 ```
 
-The repo must be cloneable from the server. If it's private, use a GitHub deploy key or a fine-grained token with read-only access to this repo.
+## 3. Download the project and install the checker
 
-## Secrets (from your laptop, never through git)
+The repository must be public or otherwise cloneable by the server. For a private repository, configure a read-only GitHub deploy key before cloning.
 
 ```bash
-scp checker/.env root@SERVER_IP:/etc/breach-city.env
+useradd --system --no-create-home --shell /usr/sbin/nologin breachcity
+git clone --branch justin/atharva-map https://github.com/askokane/somethingcity.git /srv/breach-city
+cd /srv/breach-city/checker
+npm ci --omit=dev
 ```
 
-Then on the server:
+## 4. Configure optional credentials
+
+The demo frontend works without credentials. To enable live email verification, Google sign-in, or database-backed timeline features, create `/etc/breach-city.env` on the server:
 
 ```bash
-chmod 600 /etc/breach-city.env
 nano /etc/breach-city.env
 ```
 
-In that file:
-- **add** `PUBLIC_URL=https://your-domain`,
-- **delete** the `FRONTEND_URL=…` line (it points at localhost; with it gone, sign-in returns to `PUBLIC_URL`).
+Add only the settings for features you configured. For example:
 
-The file lives in `/etc`, outside the served folder, and Caddy also refuses to serve any `.env`.
-
-## Start it
-
-```bash
-cp /srv/breach-city/deploy/breach-city.service /etc/systemd/system/
-systemctl daemon-reload && systemctl enable --now breach-city
-journalctl -u breach-city -n 20          # should say: public: https://your-domain, /dev off
-
-sed 's/your-domain.com/YOUR.REAL.DOMAIN/' /srv/breach-city/deploy/Caddyfile > /etc/caddy/Caddyfile
-systemctl reload caddy                    # gets the HTTPS certificate on the first request
+```ini
+PUBLIC_URL=https://example.com
+RESEND_API_KEY=your_resend_api_key
+EMAIL_FROM=Breach City <you@example.com>
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+DATABASE_URL=your_database_connection_string
 ```
 
-Check from your laptop:
+Replace `example.com` and the sample values. Omit any setting for an unused feature. Do not commit this file or put credentials in the repository. Save and close nano, then lock down the file:
 
 ```bash
-curl https://your-domain/api/news?limit=1     # JSON
-curl -I https://your-domain/checker/.env      # must be 404
+chown root:root /etc/breach-city.env
+chmod 600 /etc/breach-city.env
 ```
 
-## Updating after a push to main
+If you want Google sign-in, in Google Cloud Console add `https://YOUR_DOMAIN/auth/google/callback` as an authorized redirect URI and add `YOUR_DOMAIN` to authorized domains. Add user Gmail addresses as test users if the OAuth app is still in Testing mode. Keep any existing localhost redirect URI for local development. Set `PUBLIC_URL` even if you do not use optional credentials; it enables secure cookies and turns off the checker’s development page.
+
+## 5. Start the checker service
 
 ```bash
-cd /srv/breach-city && git pull && cd checker && npm ci --omit=dev && systemctl restart breach-city
+cp /srv/breach-city/deploy/breach-city.service /etc/systemd/system/breach-city.service
+systemctl daemon-reload
+systemctl enable --now breach-city
+systemctl status breach-city --no-pager
+journalctl -u breach-city -n 30 --no-pager
 ```
 
-## What changes when it's public
+The checker listens only on localhost port 8787. The systemd service reads secrets from `/etc/breach-city.env`; that file is outside the web root.
 
-- **`/dev` is off** once `PUBLIC_URL` is set. Set `DEV_PAGE=1` in the env file to turn it back on temporarily.
-- **Cookies are `Secure`**, so HTTPS only.
-- **Rate limit per visitor:** 10 code requests an hour.
-- **Email codes need `RESEND_API_KEY` for real users.** Without it, codes only appear in `journalctl`, which works for you but not for judges. Google sign-in doesn't need it.
-- **Google sign-in still only works for test users** (Testing mode): add the judges' Gmail addresses, or demo with the dummy account.
-- **Tiger Data:** if the checker can't reach the database, check the service's IP allow list in the Tiger Data console and add the server's IP.
+## 6. Configure Caddy and HTTPS
 
-## After the event
+Open the Caddy config:
 
-Delete the Vultr server, remove the redirect URI and extra test users in Google Cloud, and reset the Tiger Data password.
+```bash
+nano /etc/caddy/Caddyfile
+```
+
+Replace its contents with the following, changing `example.com` to your domain. Keep `www.example.com` only if you created its DNS record:
+
+```caddyfile
+example.com, www.example.com {
+    encode gzip
+
+    @hidden path /.git* /*/.env* /.env* /checker/node_modules/* /deploy/*
+    respond @hidden 404
+
+    @backend path /api/* /auth/*
+    reverse_proxy @backend localhost:8787
+
+    root * /srv/breach-city
+    file_server
+}
+```
+
+If you only configured the root domain, use just `example.com` on the first line. Validate and reload:
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile
+systemctl reload caddy
+```
+
+## 7. Check the live site
+
+From your computer, open `https://YOUR_DOMAIN`. The demo works without signing in. Check the checker endpoint and confirm secrets are blocked:
+
+```bash
+curl -i https://YOUR_DOMAIN/api/status
+curl -I https://YOUR_DOMAIN/checker/.env
+```
+
+The first request should return JSON. The second should return `404`. If HTTPS is not ready, verify DNS points to the Vultr IP, ports 80/443 are open in both Vultr firewall settings and UFW, and check `journalctl -u caddy -n 50 --no-pager`.
+
+## Updating after a code push
+
+SSH into the server and run:
+
+```bash
+cd /srv/breach-city
+git pull --ff-only origin justin/atharva-map
+cd checker
+npm ci --omit=dev
+systemctl restart breach-city
+```
+
+## Feature notes
+
+- Demo accounts work offline. Live breach lookups need outbound internet from the server.
+- Real email codes require `RESEND_API_KEY`; without it, codes are only logged on the server and users cannot receive them.
+- Google sign-in requires the Google OAuth settings and callback URL above.
+- The timeline and service breach database require `DATABASE_URL`. If it cannot connect, check the database provider’s network allow list for the Vultr server IP.
+- When finished, remove the instance in Vultr to stop its hourly billing. Remove OAuth redirect entries and credentials you no longer need.

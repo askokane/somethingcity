@@ -42,7 +42,7 @@ The dashboard does not collect passwords. A clear result means that the selected
 
 ## Deploy on a real domain
 
-[deploy/DEPLOY.md](deploy/DEPLOY.md) puts the frontend and checker on one Vultr server with HTTPS (Caddy), in about 15 copy-paste commands. On one domain, the frontend calls the checker at the same origin, so `CHECKER_API` becomes `""`.
+[deploy/DEPLOY.md](deploy/DEPLOY.md) explains how to run the frontend and optional checker on one Vultr server with HTTPS (Caddy). The frontend calls the checker at the same origin, so no API URL change is needed for deployment.
 
 ## Blender city and account buildings
 
