@@ -32,6 +32,8 @@ The demo should complete one clear loop:
 5. Select a building to inspect the result and suggested actions.
 6. Include a reset/demo-data path so judges can see both clean and breached examples quickly.
 
+**Demo accounts (offline fixtures, no network):** `city@demo.test` is the judged demo (20 real services with real breach history). `current@demo.test` has breaches from the last few months, dated relative to today so they always count as current. `breached@demo.test`, `clear@demo.test` and `unknown@demo.test` show one state each.
+
 Keep the visual scene and breach-check logic separate. If the live provider is unavailable, the demo remains usable with clearly labeled sample data.
 
 ## Trust, privacy, and safety boundaries
@@ -48,16 +50,35 @@ Keep the visual scene and breach-check logic separate. If the live provider is u
 
 ### Main screen
 
-- Isometric or compact 3D city with one building per monitored account.
-- Small account list / status legend alongside the city.
-- Add account and “Run checks” actions.
+- Isometric 3D Gotham city with one skyscraper per linked website, its name on the sign, plus eight landmark buildings that hold the dashboard panels.
+- Stats strip (monitored, no known match, known breach, unavailable, last check) and a city directory beside the city.
+- **Run checks** and **Reset** in the header.
+- Navigation: **City**, **Accounts** (directory), **Timeline** (public breaches per year from Tiger Data), **History** (breaches older than 12 months), **Pitch deck**, **Check** (email code) and **Google sign in**. The inbox scan is no longer a separate view; Gmail results feed the city when the user grants access at Google sign-in.
+- **Bat-Status** button on the city: a short briefing of the current check.
 - Clear timestamp and source for the latest check.
 
 ### Building states
 
-- **No known match:** calm/neutral lighting and intact appearance.
-- **Known breach:** visible alert treatment, such as warning lights or a damaged facade.
+- **No known match (calm):** neutral lighting and intact appearance.
+- **Known breach (red):** this email was in a breach of the service within the last 12 months. Visible alert treatment: damaged tower, fire and smoke, police cordon.
+- **Service breached (amber):** the service was breached, but this email wasn't found in that leak.
+- **Historical:** breaches older than 12 months no longer make a building red. They appear in the History view and the detail panel, which still advises changing that password.
 - **Unavailable:** muted/uncertain state, visually distinct from both clean and breached.
+
+### Landmark buildings (dashboard panels)
+
+Data comes from `summarize(result)` and the checker's news endpoints; see the screen map in [checker/README.md](../checker/README.md).
+
+| Landmark | Panel |
+|---|---|
+| Wayne Tower | Player card: masked email, check time, source, city health / exposure score |
+| Arkham Asylum | Breached accounts (red and amber), including services breached while the user was a member |
+| Ace Chemicals | What leaked: exposed data types, largest, oldest and newest leak |
+| Gotham Bank | All accounts: count, accounts opened per year, Google sign-ins, dormant accounts |
+| GCPD Headquarters | Mission board: prioritized fixes with links to each service; Open / Completed / All filters, progress saved in this browser per checked identity |
+| Blackgate Penitentiary | Resolved: missions the user marked complete (self-reported; breach records don't change) |
+| Cobblepot Manor | Breach news and timeline, with the user's breaches marked |
+| Elliot Memorial Hospital | Checks that couldn't complete, with the safe error and a re-check |
 
 Use color plus icons/labels so status is not communicated by color alone. Keep animation decorative; status and details must remain readable without it.
 
@@ -127,10 +148,10 @@ Adapt the timeboxes to the event length; these are relative phases.
 
 ## Demo script (about 90 seconds)
 
-1. Open the preloaded city and explain that each building represents an account.
-2. Run a check and show one known-breach fixture changing to alert state.
-3. Select it to show breach metadata and next steps.
-4. Show a clean result and an unavailable result to explain uncertainty handling.
+1. Open the city with `city@demo.test` and explain that each skyscraper is a website linked to the email.
+2. Check `current@demo.test` and show its recent breaches turning buildings red.
+3. Select a red building to show breach metadata and next steps, then open GCPD Headquarters and complete a mission so it moves to Blackgate.
+4. Show `clear@demo.test` and `unknown@demo.test` to explain uncertainty handling (Elliot Memorial).
 5. Close with the privacy boundary: no passwords are collected, and results reflect the selected data source only.
 
 ## Definition of done
@@ -151,4 +172,9 @@ Adapt the timeboxes to the event length; these are relative phases.
 
 ## Reference
 
-
+- [README.md](../README.md): run, explore and deploy the app
+- [checker/README.md](../checker/README.md): checker frontend guide, screen map, privacy and limits
+- [checker/checker.d.ts](../checker/checker.d.ts) and [checker/samples/](../checker/samples/): types and real example responses
+- [integration-handoff.md](integration-handoff.md) and [city-schematic-metrics.md](city-schematic-metrics.md): scene conventions
+- [deploy/DEPLOY.md](../deploy/DEPLOY.md): one-server HTTPS deploy
+- Workstream instructions: [Tai](Tai-instructions.md), [Daniel](Daniel-instructions.md), [Justin](Justin-instructions.md), [Atharva](Atharva-instructions.md)
