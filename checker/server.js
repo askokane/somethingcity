@@ -1,5 +1,5 @@
 // Breach City live checker server. Run: node checker/server.js
-// Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PUBLIC_URL, PORT
+// Env (all optional; see README): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, RESEND_API_KEY, EMAIL_FROM, DATABASE_URL, FRONTEND_URL, PUBLIC_URL, PORT, HOST
 import http from "node:http";
 import { createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { accountId, lookupDomains, maskEmail, normalizeEmail, toAccounts } from "./checker.js";
@@ -7,6 +7,8 @@ import { checkXon, getCatalog, scanInbox } from "./sources.js";
 import { news, personalTimeline, serviceBreaches, timeline } from "./db.js";
 
 const PORT = Number(process.env.PORT) || 8787;
+// Keep local development private; bind to all interfaces when deployed so the host's router can reach the process.
+const HOST = process.env.HOST || (process.env.PUBLIC_URL ? "0.0.0.0" : "localhost");
 // Deployed (see DEPLOY.md): PUBLIC_URL=https://your-domain, with Caddy serving the frontend and proxying here on the same origin.
 const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
 const FRONTEND_URL = process.env.FRONTEND_URL || PUBLIC_URL || "http://localhost:8000"; // the frontend (serve.ps1) runs on 8000
@@ -308,8 +310,8 @@ export const server = http.createServer(async (req, res) => {
 });
 
 if (import.meta.main) {
-  server.listen(PORT, "localhost", () => {
-    console.log(`Breach City checker on http://localhost:${PORT}${PUBLIC_URL ? ` (public: ${PUBLIC_URL}, /dev ${DEV_PAGE_ON ? "on" : "off"})` : ""}`);
+  server.listen(PORT, HOST, () => {
+    console.log(`Breach City checker on http://${HOST}:${PORT}${PUBLIC_URL ? ` (public: ${PUBLIC_URL}, /dev ${DEV_PAGE_ON ? "on" : "off"})` : ""}`);
     console.log(`  email codes: ${process.env.RESEND_API_KEY ? "sent with Resend" : "printed here (no RESEND_API_KEY)"}`);
     console.log(`  Google sign-in + inbox scan: ${process.env.GOOGLE_CLIENT_ID ? "on" : "off (no GOOGLE_CLIENT_ID)"}`);
     console.log(`  Tiger Data timeline + service breaches: ${process.env.DATABASE_URL ? "on" : "off (no DATABASE_URL; using in-memory catalog)"}`);  });
