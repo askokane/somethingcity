@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellX, cellZ, isOnLand, landCells, islands, bridges, bridgeSpans, widenedShore } from './city-layout.js';
+import { blocks, slots, landmarks, createCity, landmarkLabel, FLOOR, UNITS_PER_METER, CITY_SIZE, CITY_CENTER_Z, CITY_CENTER_X, cellX, cellZ, cellPos, cornerPos, isOnLand, landCells, islands, bridges, bridgeSpans, widenedShore, deckEdges, shoreSidewalks } from './city-layout.js';
 import { scatterSlotOrder, freshPlacementSeed, seededRandom as placementRandomGenerator } from './city-scatter.js';
 import { checkAccount, checkSignedIn } from './checker/checker.js';
 import { buildMissions, readProgress, saveProgress, serviceUrl } from './mission-board.js';
@@ -114,6 +114,9 @@ function loadModel(path) {
 
 const propAxisCorrection = new Map([
   ['Gotham_Crosswalk', -Math.PI / 2],
+  // Tai's sidewalk kit stores its height along -Z (top face at z -0.23), so +90 degrees about X stands it on the street.
+  ['Gotham_Sidewalk_Straight', Math.PI / 2],
+  ['Gotham_Sidewalk_Corner', Math.PI / 2],
   // These GLBs store their height along -Z (e.g. tree z from -4.07 to 0), so +90° about X stands them up.
   // -90° turned them upside down (canopy at the bottom).
   ['Gotham_Fire_Hydrant', Math.PI / 2],
@@ -382,7 +385,8 @@ function addPark(cx, cz, half, { seed = 1, lawn = true, paths = false, trees = 2
 // with paths, otherwise each free plot gets its own small walled park. Re-run whenever the accounts change.
 const plotParkRoots = [];
 // Empty plots get non-clickable filler: favelas (Daniel's four variants) in Bristol Township, the islands and the slum
-// districts along the river inlets, and Daniel's level-1/level-2 account buildings everywhere else. Instanced, with a
+// districts along the river inlets, and Daniel's account buildings 01-10 everywhere else (short ones more often than
+// tall ones, so the skyline still steps up to the website towers). Instanced, with a
 // random variant and quarter-turn fixed per plot and random window lights. Garden blocks are walled parks.
 // Re-run whenever accounts change.
 const SLUMS = new Set(['West Harlow', 'Chinatown', 'Reatton']);
@@ -399,15 +403,17 @@ function syncPlotParks() {
   favelaGroup = new THREE.Group();
   favelaGroup.name = 'Filler buildings';
   scene.add(favelaGroup);
-  const lowRise = (loadedBuildingModels?.towers ?? []).slice(0, 2).filter(Boolean);
-  const kinds = [...favelaModels.map((model) => ({ model, favela: true, plots: [] })), ...lowRise.map((model) => ({ model, favela: false, plots: [] }))];
+  const towers = (loadedBuildingModels?.towers ?? []).filter(Boolean);
+  const kinds = [...favelaModels.map((model) => ({ model, favela: true, plots: [] })), ...towers.map((model) => ({ model, favela: false, plots: [] }))];
   slots.forEach((slot, i) => {
     if (slotOccupants.has(i)) return;
     const random = seededRandom(i * 7919 + 13);
     const choices = kinds.filter((kind) => kind.favela === isFavelaPlot(slot));
     const pool = choices.length ? choices : kinds; // until Daniel's towers load, favelas stand in everywhere
     if (!pool.length) return;
-    pool[Math.floor(random() * pool.length)].plots.push([slot.x, 0.23, slot.z, Math.floor(random() * 4) * Math.PI / 2]);
+    // Towers: skewed toward the low ones (random squared); favelas: even odds.
+    const kind = pool[Math.floor((pool[0].favela ? random() : random() ** 2) * pool.length)];
+    kind.plots.push([slot.x, 0.23, slot.z, faceToward(kind.model, eastOrSouth(random))]); // front toward the camera
   });
   kinds.forEach(({ model, plots }) => {
     const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3());
@@ -431,7 +437,7 @@ function syncPlotParks() {
 }
 
 async function addCityProps(environment) {
-  const names = ['gotham_bushes', 'gotham_crosswalk', 'gotham_fire_hydrant', 'gotham_lamppost', 'gotham_large_tree', 'gotham_park_wall', 'gotham_stoplight', 'gotham_street_tree'];
+  const names = ['gotham_bushes', 'gotham_crosswalk', 'gotham_sidewalks', 'gotham_fire_hydrant', 'gotham_lamppost', 'gotham_large_tree', 'gotham_park_wall', 'gotham_stoplight', 'gotham_street_tree'];
   const loaded = await Promise.all(names.map(async (name) => {
     try { return [name, await loadModel(`./models/everything-else/${name}.glb`)]; }
     catch (error) { console.warn(`Could not load ${name}:`, error); return [name, null]; }
@@ -486,6 +492,60 @@ async function addCityProps(environment) {
     part(x - hw * 0.55, .52 + .23, sz + .13, 1.1, .34, .07, wood);
     for (const dx of [-.4, .4]) part(x - hw * 0.55 + dx, .18 + .23, sz, .08, .24, .3, metal);
   });
+  // Tai's sidewalk kit: a 0.6-wide ring round every block (corners, then straights stretched to fill each side), curbs
+  // facing the road. The kit is 1.5 wide at true scale, wider than the blocks' kerb strip, so it is scaled to 0.4.
+  const kitStraight = piece(props.gotham_sidewalks, 'Gotham_Sidewalk_Straight'); // piece() drops the kit's layout offsets
+  const kitCorner = piece(props.gotham_sidewalks, 'Gotham_Sidewalk_Corner');
+  if (kitStraight && kitCorner) {
+    const RING = 0.6, S = RING / 1.5, LENGTH = 3 * S; // a straight is 1.2 long once scaled
+    const corners = [];
+    const straights = new Map(); // stretch -> placements
+    // At yaw 0 a straight runs along z with its curb on -x, and a corner's curbs are on -x and -z.
+    const straightYaw = (nx, nz) => Math.atan2(nz, -nx);
+    const cornerYaw = { '-1,-1': 0, '1,-1': -Math.PI / 2, '1,1': Math.PI, '-1,1': Math.PI / 2 };
+    const ringed = blocks.flatMap((b) => {
+      if (b.format !== 'avenue') return [b];
+      const alongX = b.avenue === 'x';
+      return [-1, 1].map((side) => ({ x: b.x + (alongX ? 0 : side * 3), z: b.z + (alongX ? side * 3 : 0), width: alongX ? b.width : 3, depth: alongX ? 3 : b.depth }));
+    });
+    for (const b of ringed) {
+      const hw = b.width / 2, hd = b.depth / 2;
+      for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) corners.push([b.x + sx * (hw - RING), 0.07, b.z + sz * (hd - RING), cornerYaw[`${sx},${sz}`]]);
+      for (const [alongX, half, run] of [[true, hd, b.width - 4 * RING], [false, hw, b.depth - 4 * RING]]) {
+        if (run <= 0.05) continue;
+        const n = Math.max(1, Math.round(run / LENGTH));
+        const key = (run / (n * LENGTH)).toFixed(3);
+        if (!straights.has(key)) straights.set(key, []);
+        for (const side of [-1, 1]) for (let i = 0; i < n; i++) {
+          const t = -run / 2 + (i + 0.5) * run / n;
+          straights.get(key).push(alongX
+            ? [b.x + t, 0.07, b.z + side * (half - RING / 2), straightYaw(0, side)]
+            : [b.x + side * (half - RING / 2), 0.07, b.z + t, straightYaw(side, 0)]);
+        }
+      }
+    }
+    instanceModel(kitCorner, [S, S, 1], corners, furniture);
+    for (const [stretch, list] of straights) instanceModel(kitStraight, [S, S * Number(stretch), 1], list, furniture);
+    // The widened shore streets' outer sidewalks (0.8 wide, curb toward the road, i.e. inland). They stand on the shore
+    // extension's rock base, so they are stretched a little taller to meet the pavement level.
+    const SHORE_S = 0.8 / 1.5, SHORE_LENGTH = 3 * SHORE_S, TALL = (0.23 - 0.02) / 0.16;
+    const shoreStraights = new Map();
+    for (const band of shoreSidewalks) {
+      const n = Math.max(1, Math.round(band.length / SHORE_LENGTH));
+      const key = (band.length / (n * SHORE_LENGTH)).toFixed(3);
+      if (!shoreStraights.has(key)) shoreStraights.set(key, []);
+      for (let i = 0; i < n; i++) {
+        const t = -band.length / 2 + (i + 0.5) * band.length / n;
+        shoreStraights.get(key).push(band.vertical
+          ? [band.x, 0.02, band.z + t, straightYaw(-band.outward, 0)]
+          : [band.x + t, 0.02, band.z, straightYaw(0, -band.outward)]);
+      }
+    }
+    for (const [stretch, list] of shoreStraights) instanceModel(kitStraight, [SHORE_S, SHORE_S * Number(stretch), TALL], list, furniture);
+  }
+  // Crosswalks across every street just outside each intersection, where the walking network crosses. The paint's bars
+  // run along its local x (the traffic direction for a street along x) and repeat across the street.
+  if (props.gotham_crosswalk) instanceModel(props.gotham_crosswalk, [1 / 2.9, 2.9 / 2.52, 1], crossings.map(([x, z, yaw]) => [x, 0.075, z, yaw]), furniture);
   if (props.gotham_lamppost) instanceModel(props.gotham_lamppost, scaleForHeight(props.gotham_lamppost, 4.5), lamps, furniture);
   if (hedge) instanceModel(hedge, scaleForHeight(hedge, 0.9), hedges, furniture);
   if (compact) instanceModel(compact, scaleForHeight(compact, 0.8), bushes, furniture);
@@ -581,12 +641,12 @@ const SHIPS = [
   // Cargo barge between the two ports: Haysville Docks' berth (east shore), out to sea, south of South Hinkley (no
   // bridges to pass under), up the channel east of Bristol to West Harlow Docks' berth (west shore). Each berth is under
   // the port's crane, inside its breakwater. Corners are rounded into arcs.
-  { file: 'cargo_barge_gotham_river', mode: 'route', points: [[86.5, 40], [104, 40], [104, 108], [-84, 108], [-84, 52], [-62.5, 52]], speed: 2.4 },
+  { file: 'cargo_barge_gotham_river', mode: 'route', points: [[88.8, 52], [104, 52], [104, 117], [-80, 117], [-80, 52], [-64.8, 52]], speed: 2.4 },
   { file: 'bristol_midtown_ferry', mode: 'shuttle', from: [-84, 12], to: [-36, 12], speed: 2.4 }, // lower inlet, west of the bridge
   { file: 'cargo_barge_gotham_river', mode: 'shuttle', from: [-76, -104], to: [-76, -40], speed: 1.4 }, // Gotham River, north of the bridges
   { file: 'fishing_trawler_narrows', mode: 'drift', at: [118, -62], heading: 2.2 },
   { file: 'fishing_longliner_crown_point', mode: 'drift', at: [102, -104], heading: 0.6 },
-  { file: 'fishing_skiff_blackgate', mode: 'drift', at: [-66, 116], heading: -0.9 },
+  { file: 'fishing_skiff_blackgate', mode: 'drift', at: [-66, 129], heading: -0.9 },
   { file: 'sailboat_west_bay', mode: 'moored', at: [-60, -38], heading: Math.PI / 2 }, // off Reatton Beach
   { file: 'schooner_west_bay', mode: 'moored', at: [-64, -60], heading: 0.3 },
   { file: 'rowboat_beach_cove', mode: 'moored', at: [4, 80], heading: 1.2 }, // off Stevensburgh Strand
@@ -782,7 +842,7 @@ const roadGraph = (() => {
   blocks.forEach((b, i) => b.cells.forEach((c) => blockOf.set(`${c.row},${c.col}`, i)));
   const nodes = new Map(); // key -> { x, z, links: Map(key -> length) }
   const node = (key, x, z) => { if (!nodes.has(key)) nodes.set(key, { key, x, z, links: new Map() }); return nodes.get(key); };
-  const corner = (i, j) => node(`c${i},${j}`, cellX(j) - 6, cellZ(i) - 6);
+  const corner = (i, j) => { const p = cornerPos(i, j); return node(`c${i},${j}`, p.x, p.z); };
   const link = (a, b) => { const d = Math.hypot(a.x - b.x, a.z - b.z); a.links.set(b.key, d); b.links.set(a.key, d); };
   const street = (cellA, cellB) => {
     const a = cellAt.has(cellA), b = cellAt.has(cellB);
@@ -793,19 +853,33 @@ const roadGraph = (() => {
   const cols = Math.max(...landCells.map((c) => c.col)) + 2;
   for (let i = 0; i <= rows; i++) for (let j = 0; j <= cols; j++) {
     if (j < cols && street(`${i - 1},${j}`, `${i},${j}`)) link(corner(i, j), corner(i, j + 1)); // along a row boundary
-    if (i < rows && street(`${i},${j - 1}`, `${i},${j}`)) link(corner(i, j), corner(i + 1, j)); // along a column boundary
+    // Along a column boundary (none on a port's deck, which runs to the quay).
+    if (i < rows && street(`${i},${j - 1}`, `${i},${j}`) && !deckEdges.has(`${cornerPos(i, j).x},${cornerPos(i, j).z + 6}`)) link(corner(i, j), corner(i + 1, j));
   }
   for (const [[r1, c1], [r2, c2]] of bridgeSpans) {
     const [ra, ca, rb, cb] = r1 + c1 <= r2 + c2 ? [r1, c1, r2, c2] : [r2, c2, r1, c1];
     let a, b;
     if (ca === cb) { // north-south: from the bottom edge of the north cell to the top edge of the south cell
-      a = node(`b${ra},${ca}s`, cellX(ca), cellZ(ra) + 6); link(a, corner(ra + 1, ca)); link(a, corner(ra + 1, ca + 1));
-      b = node(`b${rb},${cb}n`, cellX(cb), cellZ(rb) - 6); link(b, corner(rb, cb)); link(b, corner(rb, cb + 1));
+      a = node(`b${ra},${ca}s`, cellPos(ra, ca).x, cellPos(ra, ca).z + 6); link(a, corner(ra + 1, ca)); link(a, corner(ra + 1, ca + 1));
+      b = node(`b${rb},${cb}n`, cellPos(rb, cb).x, cellPos(rb, cb).z - 6); link(b, corner(rb, cb)); link(b, corner(rb, cb + 1));
     } else { // east-west
-      a = node(`b${ra},${ca}e`, cellX(ca) + 6, cellZ(ra)); link(a, corner(ra, ca + 1)); link(a, corner(ra + 1, ca + 1));
-      b = node(`b${rb},${cb}w`, cellX(cb) - 6, cellZ(rb)); link(b, corner(rb, cb)); link(b, corner(rb + 1, cb));
+      a = node(`b${ra},${ca}e`, cellPos(ra, ca).x + 6, cellPos(ra, ca).z); link(a, corner(ra, ca + 1)); link(a, corner(ra + 1, ca + 1));
+      b = node(`b${rb},${cb}w`, cellPos(rb, cb).x - 6, cellPos(rb, cb).z); link(b, corner(rb, cb)); link(b, corner(rb + 1, cb));
     }
     link(a, b);
+    // Avenues: the bridge's road carries on through its landing block to a T on the far ring street.
+    const unlink = (p, q) => { p.links.delete(q.key); q.links.delete(p.key); };
+    for (const [end, row, col, out] of [[a, ra, ca, ca === cb ? 's' : 'e'], [b, rb, cb, ca === cb ? 'n' : 'w']]) {
+      if (!blocks.some((blk) => blk.format === 'avenue' && blk.cells.some((c) => c.row === row && c.col === col))) continue;
+      // The near street (the shore edge) is split at the bridge end; the far edge gets a junction node.
+      const near = { s: [corner(row + 1, col), corner(row + 1, col + 1)], n: [corner(row, col), corner(row, col + 1)], e: [corner(row, col + 1), corner(row + 1, col + 1)], w: [corner(row, col), corner(row + 1, col)] }[out];
+      const farSide = { s: 'n', n: 's', e: 'w', w: 'e' }[out];
+      const far = { s: [corner(row + 1, col), corner(row + 1, col + 1)], n: [corner(row, col), corner(row, col + 1)], e: [corner(row, col + 1), corner(row + 1, col + 1)], w: [corner(row, col), corner(row + 1, col)] }[farSide];
+      const t = node(`v${row},${col}`, (far[0].x + far[1].x) / 2, (far[0].z + far[1].z) / 2);
+      unlink(near[0], near[1]);
+      unlink(far[0], far[1]);
+      link(t, far[0]); link(t, far[1]); link(end, t);
+    }
   }
   return nodes;
 })();
@@ -850,7 +924,7 @@ function blockyBatman() {
 }
 
 const batRun = { rider: null, door: null, path: [], leg: 0, travelled: 0, phase: 'home', clock: 0, target: null };
-const TRAP_DOOR = { x: cellX(1), z: cellZ(5) - 6 }; // the street on Wayne Estate's south side
+const TRAP_DOOR = { x: cellPos(5, 1).x, z: cellPos(5, 1).z - 6 }; // the street on Wayne Estate's south side
 async function prepareBatRun() {
   let rider = null;
   for (const path of ['./models/vehicles/batmobile.glb', './models/npcs/gotham_batman.glb']) {
@@ -982,31 +1056,65 @@ function updateBatRun(time) {
 
 // ---- Pedestrians --------------------------------------------------------------------------------------------------
 // Tai's ambient sprite sheet (models/everything-else/gotham_ambient_sprites.png: rows Commuter, Hooded, Porter, Bat;
-// four 128 px walk frames each) brings ~70 people to the sidewalks. They walk the street network (on the land side of
-// each street, on the deck of bridges), turn at random at corners and steer away from breached skyscrapers. Anyone who
-// gets within DANGER of one breaks into a run away from it until they are SAFE.
+// four 128 px walk frames each) brings ~70 people to the city. They walk only the sidewalks (the kit ring round each block)
+// and cross streets only on the crosswalks, turn at random at corners and steer away from breached skyscrapers. Anyone
+// who gets within DANGER of one breaks into a run away from it until they are SAFE. Bridges are left to traffic.
 const NPC_COUNT = 70;
 const NPC_HEIGHT = 1.7;
 const NPC_WALK = 1.3; // units per second
 const NPC_RUN = 4.8;
 const DANGER = 8; // a breached tower's reach
 const SAFE = 11; // running stops beyond this
+const KERB = 1.8; // a sidewalk's centreline from the street's centreline (half the 3-unit street, plus half the 0.6 ring)
 const npcs = [];
 let breachedTowerSpots = [];
 function syncBreachedTowers() {
   breachedTowerSpots = accounts.filter((account) => account.status === 'breached' && account.slot >= 0).map((account) => slots[account.slot]);
 }
 const nearestDanger = (x, z) => breachedTowerSpots.reduce((best, spot) => Math.min(best, Math.hypot(spot.x - x, spot.z - z)), Infinity);
-// Where along a street a pedestrian walks: off the street's centreline toward the land side (on bridges, the deck).
-function sidewalkOffset(a, b) {
-  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-  const nx = -(b.z - a.z) / len, nz = (b.x - a.x) / len;
-  const bridge = a.key.startsWith('b') && b.key.startsWith('b');
-  if (bridge) return { nx, nz, d: 1.1, y: 0.12 };
-  const mx = (a.x + b.x) / 2, mz = (a.z + b.z) / 2;
-  const side = isOnLand(mx + nx * 1.75, mz + nz * 1.75, 0.2) ? 1 : -1;
-  return { nx, nz, d: 1.75 * side, y: 0.23 };
-}
+// The walking network: a node at each block corner's sidewalk (KERB off both streets), linked along each block side
+// (sidewalk) and across each street just outside the intersection (crosswalk). `crossings` are where the crosswalks go.
+const crossings = [];
+const walkGraph = (() => {
+  const nodes = new Map();
+  const node = (x, z) => {
+    if (!isOnLand(x, z)) return null;
+    const key = `${x.toFixed(1)},${z.toFixed(1)}`;
+    if (!nodes.has(key)) nodes.set(key, { key, x, z, links: new Map() });
+    return nodes.get(key);
+  };
+  const link = (a, b, cross) => {
+    if (!a || !b) return false;
+    const len = Math.hypot(a.x - b.x, a.z - b.z);
+    a.links.set(b.key, { len, cross });
+    b.links.set(a.key, { len, cross });
+    return true;
+  };
+  for (const n of roadGraph.values()) for (const key of n.links.keys()) {
+    const m = roadGraph.get(key);
+    if (n.key.startsWith('b') && key.startsWith('b')) continue; // bridge decks
+    const len = Math.hypot(m.x - n.x, m.z - n.z);
+    const dx = (m.x - n.x) / len, dz = (m.z - n.z) / len, px = -dz, pz = dx;
+    // Along the block side between this corner and the next, on both sides of the street.
+    for (const side of [-1, 1]) {
+      link(node(n.x + (dx + px * side) * KERB, n.z + (dz + pz * side) * KERB), node(m.x + (-dx + px * side) * KERB, m.z + (-dz + pz * side) * KERB), false);
+    }
+    // Across this street at n's end.
+    if (link(node(n.x + (dx + px) * KERB, n.z + (dz + pz) * KERB), node(n.x + (dx - px) * KERB, n.z + (dz - pz) * KERB), true)) {
+      crossings.push([n.x + dx * KERB, n.z + dz * KERB, Math.abs(dx) > 0.5 ? 0 : Math.PI / 2]);
+    }
+  }
+  for (const t of roadGraph.values()) {
+    if (!t.key.startsWith('v')) continue;
+    const keys = [...t.links.keys()];
+    const avenue = roadGraph.get(keys.find((k) => k.startsWith('b')));
+    const street = roadGraph.get(keys.find((k) => k.startsWith('c')));
+    const al = Math.hypot(avenue.x - t.x, avenue.z - t.z), sl = Math.hypot(street.x - t.x, street.z - t.z);
+    const ax = -(avenue.x - t.x) / al, az = -(avenue.z - t.z) / al, sx = (street.x - t.x) / sl, sz = (street.z - t.z) / sl;
+    link(node(t.x + (sx + ax) * KERB, t.z + (sz + az) * KERB), node(t.x + (-sx + ax) * KERB, t.z + (-sz + az) * KERB), false);
+  }
+  return nodes;
+})();
 async function spawnPedestrians() {
   const atlas = await new THREE.TextureLoader().loadAsync('./models/everything-else/gotham_ambient_sprites.png').catch(() => null);
   if (!atlas) return;
@@ -1020,22 +1128,21 @@ async function spawnPedestrians() {
     texture.needsUpdate = true;
     return texture;
   })));
-  const walkable = [...roadGraph.values()].filter((n) => n.links.size);
+  const walkable = [...walkGraph.values()].filter((n) => n.links.size);
   for (let i = 0; i < NPC_COUNT; i++) {
     const from = walkable[Math.floor(Math.random() * walkable.length)];
-    const to = roadGraph.get([...from.links.keys()][Math.floor(Math.random() * from.links.size)]);
+    const to = walkGraph.get([...from.links.keys()][Math.floor(Math.random() * from.links.size)]);
     const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: frames[i % 3][0][0], transparent: true, alphaTest: 0.35 }));
     sprite.scale.set(NPC_HEIGHT, NPC_HEIGHT, 1);
     sprite.center.set(0.5, 0.1); // feet on the pavement
     scene.add(sprite);
-    npcs.push({ sprite, frames: frames[i % 3], from, to, walk: sidewalkOffset(from, to), t: Math.random(), running: false, step: Math.random() * 4 });
+    npcs.push({ sprite, frames: frames[i % 3], from, to, t: Math.random(), running: false, step: Math.random() * 4 });
   }
 }
-// Next street at a corner: away from the nearest breached tower when running; otherwise a random one that doesn't lead
+// Next leg at a corner: away from the nearest breached tower when running; otherwise a random one that doesn't lead
 // toward one (never straight back unless it's a dead end).
 function nextStreet(npc) {
-  const here = npc.to;
-  let options = [...here.links.keys()].map((key) => roadGraph.get(key)).filter((n) => n !== npc.from);
+  let options = [...npc.to.links.keys()].map((key) => walkGraph.get(key)).filter((n) => n !== npc.from);
   if (!options.length) options = [npc.from];
   if (npc.running) return options.reduce((best, n) => (nearestDanger(n.x, n.z) > nearestDanger(best.x, best.z) ? n : best));
   const safe = options.filter((n) => nearestDanger(n.x, n.z) > DANGER);
@@ -1051,29 +1158,25 @@ function updatePedestrians(time) {
   cameraRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
   for (const npc of npcs) {
     let { from: a, to: b } = npc;
-    let len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-    const x0 = a.x + (b.x - a.x) * npc.t, z0 = a.z + (b.z - a.z) * npc.t;
-    const danger = nearestDanger(x0, z0);
+    const danger = nearestDanger(a.x + (b.x - a.x) * npc.t, a.z + (b.z - a.z) * npc.t);
     if (!npc.running && danger < DANGER) {
       npc.running = true;
-      // Turn round if this street heads toward the danger.
-      if (nearestDanger(b.x, b.z) < nearestDanger(a.x, a.z)) { [npc.from, npc.to] = [b, a]; npc.t = 1 - npc.t; npc.walk = sidewalkOffset(npc.to === a ? b : a, npc.to); [a, b] = [npc.from, npc.to]; }
+      if (nearestDanger(b.x, b.z) < nearestDanger(a.x, a.z)) { [npc.from, npc.to] = [b, a]; npc.t = 1 - npc.t; } // turn round
     } else if (npc.running && danger > SAFE) {
       npc.running = false;
     }
-    npc.t += ((npc.running ? NPC_RUN : NPC_WALK) * dt) / len;
+    npc.t += ((npc.running ? NPC_RUN : NPC_WALK) * dt) / npc.from.links.get(npc.to.key).len;
     while (npc.t >= 1) {
+      const leftover = (npc.t - 1) * npc.from.links.get(npc.to.key).len;
       const next = nextStreet(npc);
-      npc.t = (npc.t - 1) * len;
-      npc.from = npc.to;
-      npc.to = next;
-      npc.walk = sidewalkOffset(npc.from, npc.to);
-      [a, b] = [npc.from, npc.to];
-      len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-      npc.t /= len;
+      [npc.from, npc.to] = [npc.to, next];
+      npc.t = leftover / npc.from.links.get(npc.to.key).len;
     }
-    const { nx, nz, d, y } = npc.walk;
-    npc.sprite.position.set(a.x + (b.x - a.x) * npc.t + nx * d, y, a.z + (b.z - a.z) * npc.t + nz * d);
+    [a, b] = [npc.from, npc.to];
+    const { len, cross } = a.links.get(b.key);
+    // On a crosswalk, step down to the road between the kerbs.
+    const y = cross && Math.abs(npc.t - 0.5) * len < KERB - 0.3 ? 0.08 : 0.23;
+    npc.sprite.position.set(a.x + (b.x - a.x) * npc.t, y, a.z + (b.z - a.z) * npc.t);
     npc.step += dt * (npc.running ? 14 : 6);
     const mirrored = (b.x - a.x) * cameraRight.x + (b.z - a.z) * cameraRight.z < 0; // heading screen-left
     npc.sprite.material.map = npc.frames[Math.floor(npc.step) % 4][mirrored ? 1 : 0];
@@ -1163,7 +1266,8 @@ function updateTraffic(time) {
     // street is only its land-side half and both directions share it.
     const mx = (c.from.x + c.to.x) / 2, mz = (c.from.z + c.to.z) / 2;
     const rightLand = isOnLand(mx - dz, mz + dx), leftLand = isOnLand(mx + dz, mz - dx);
-    const lane = bridge || (rightLand && leftLand) || widenedShore.has(`${mx},${mz}`) ? LANE : rightLand ? 0.75 : -0.75;
+    const edgeKey = Math.abs(dx) > 0.5 ? `${Math.round(mx / 12) * 12},${mz}` : `${mx},${Math.round(mz / 12) * 12}`;
+    const lane = bridge || (rightLand && leftLand) || widenedShore.has(edgeKey) ? LANE : rightLand ? 0.75 : -0.75;
     c.car.position.set(c.from.x + dx * len * c.t - dz * lane, bridge ? 0.12 : ROAD_Y, c.from.z + dz * len * c.t + dx * lane);
     const target = Math.atan2(-dx, -dz); // the cars' noses point -Z
     if (c.yaw === null) c.yaw = target;
@@ -1232,7 +1336,7 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
       : landmark.name === 'Wayne Tower'
         ? landmark.height / size.y // even scale: true proportions, landmark.height tall
         : [(block.width - 1.2) / size.x, landmark.height / size.y, (block.depth - 1.2) / size.z];
-    const root = addPlacedModel(source, [block.x, 0.23, block.z], scale);
+    const root = addPlacedModel(source, [block.x, 0.23, block.z], scale, faceToward(source, YAW_SOUTH)); // landmarks face south
     flickerWindows(root);
     root.userData.landmark = landmark.name;
     const label = landmarkLabel(landmark.name); label.position.set(block.x, 0.23 + landmark.height + 0.8, block.z); scene.add(label);
@@ -1256,6 +1360,42 @@ function towerVariant(account, now = Date.now()) {
   return Math.max(0, Math.min(9, Math.floor((now - seen) / (365.25 * 864e5) / 1.5)));
 }
 
+// The camera is fixed and looks from the south-east, so only a building's east (+x) and south (+z) sides are ever
+// seen. A model's front is the side with the most doors and windows (doors count for more); it is turned to face east or
+// south. frontYaw is the front's heading as a yaw angle (east 0, south -90 degrees), cached on the model.
+const YAW_EAST = 0, YAW_SOUTH = -Math.PI / 2;
+function frontYaw(model) {
+  if (model.userData.frontYaw !== undefined) return model.userData.frontYaw;
+  model.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(model);
+  const middle = bounds.getCenter(new THREE.Vector3()), size = bounds.getSize(new THREE.Vector3());
+  const sides = [[1, 0], [-1, 0], [0, 1], [0, -1]]; // +x, -x, +z, -z as [x, z]
+  const yaws = [0, Math.PI, -Math.PI / 2, Math.PI / 2]; // +x, -x, +z, -z
+  const weight = [0, 0, 0, 0];
+  const v = new THREE.Vector3();
+  model.traverse((mesh) => {
+    if (!mesh.isMesh) return;
+    const name = `${mesh.material?.name || ''} ${mesh.name}`;
+    const w = /door|entr|portico|stair/i.test(name) ? 20 : /window|amber|glass|glow/i.test(name) ? 1 : 0;
+    if (!w) return;
+    const position = mesh.geometry.attributes.position;
+    for (let i = 0; i < position.count; i++) {
+      v.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld).sub(middle);
+      // The side this vertex is furthest toward, if it is in that side's outer part.
+      let side = -1, best = 0.25;
+      sides.forEach(([x, z], k) => { const reach = (v.x * x + v.z * z) / (x ? size.x / 2 : size.z / 2); if (reach > best) { best = reach; side = k; } });
+      if (side >= 0) weight[side] += w;
+    }
+  });
+  const most = Math.max(...weight);
+  // Daniel's landmarks are modelled facing +z; keep that unless another side clearly wins.
+  const front = !most || weight[2] >= most * 0.8 ? 2 : weight.indexOf(most);
+  return (model.userData.frontYaw = yaws[front]);
+}
+// Yaw that turns a model's front to face `want` (YAW_EAST or YAW_SOUTH).
+const faceToward = (model, want) => want - frontYaw(model);
+const eastOrSouth = (random) => (random() < 0.5 ? YAW_EAST : YAW_SOUTH);
+
 function chooseBuildingModel(account, models) {
   const tower = models.towers?.[towerVariant(account)];
   if (tower) return tower;
@@ -1277,7 +1417,7 @@ function addAccountBuilding(account, source, scale = 2) {
   const model = source.clone(true);
   const placementSeed = [...account.id].reduce((hash, c) => Math.imul(hash, 31) + c.charCodeAt(0), account.slot + 1);
   const placementRandom = placementRandomGenerator(placementSeed);
-  model.rotation.y = Math.floor(placementRandom() * 4) * Math.PI / 2;
+  model.rotation.y = faceToward(source, eastOrSouth(placementRandom)); // front toward the camera, never the back
 
   const raw = new THREE.Box3().setFromObject(source).getSize(new THREE.Vector3());
   const age = account.firstSeen ? Math.max(0, (Date.now() - Date.parse(account.firstSeen)) / 31557600000) : 3;
@@ -1315,7 +1455,9 @@ function addAccountBuilding(account, source, scale = 2) {
 // Daniel's panes are merged into one mesh per material, so each pane is found as a connected piece of the mesh
 // (triangles sharing corners) and gets its own random seed; a small shader patch turns ~35% of panes off. Off panes keep
 // a faint glow.
-const WINDOW_MATERIAL = /window/i;
+// Window panes across the kits: 'window' materials, plus amber and glass panes (MAT_Account_Amber, MAT_F02_Amber,
+// MAT_Bank_AmberGlass, MAT_Redesign_WarmGlass...). Not recesses, frames or the chemical tanks' glass.
+const WINDOW_MATERIAL = { test: (name) => /window|amber|glass/i.test(name) && !/recess|frame|sill|tank/i.test(name) };
 function windowSeeds(geometry) {
   if (geometry.attributes.windowSeed) return;
   const position = geometry.attributes.position;

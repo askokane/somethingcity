@@ -6,7 +6,7 @@ import { isBeachEdge } from './coastal-plan.js';
 import { seededRandom } from './city-scatter.js';
 
 
-import { blocks, slots, islands, bridges, landCells, edges, landmarks, FLOOR } from './city-plan.js';
+import { blocks, slots, islands, bridges, landCells, edges, landmarks, FLOOR, isOnLand, SHORE_SET_OUT } from './city-plan.js';
 export * from './city-plan.js';
 
 // Which side of a shore edge is land, and which block owns that land.
@@ -19,11 +19,21 @@ const shoreSide = (edge) => {
   const outward = edge.vertical ? Math.sign(edge.x - inner[0]) : Math.sign(edge.z - inner[1]);
   return { block: blockOf.get(`${inner[0]},${inner[1]}`), outward };
 };
-// Working waterfronts keep their seawall: the docks and Ace Chemicals.
-const keepsSeawall = (block) => block?.format === 'dockyard' || landmarks.some((l) => l.name === 'Ace Chemicals' && blocks[l.block] === block);
+// Working waterfronts keep their seawall: the docks, the container yard and Ace Chemicals.
+const keepsSeawall = (block) => ['dockyard', 'containeryard'].includes(block?.format) || landmarks.some((l) => l.name === 'Ace Chemicals' && blocks[l.block] === block);
 // Shoreline streets were half a street (the land-side lane, sand beyond). Away from beaches and working waterfronts the
 // coast is pushed out one lane so they are full two-lane streets; keyed by the edge's midpoint "x,z".
-export const widenedShore = new Set(edges.filter((edge) => edge.shore && !isBeachEdge(edge) && !keepsSeawall(shoreSide(edge).block)).map((edge) => `${edge.x},${edge.z}`));
+// The widened shore's sidewalk bands, laid with Tai's sidewalk kit in app.js: { x, z, length, vertical, outward }.
+export const shoreSidewalks = [];
+// On the docks' and container yard's port face (the sea side the cranes work, east or west) there is no shore street:
+// their deck runs from the block out to the quay. Their other shores keep the street. Keyed by edge midpoint "x,z".
+const isDeckBlock = (block) => ['dockyard', 'containeryard'].includes(block?.format);
+export const deckEdges = new Set(edges.filter((edge) => {
+  if (!edge.shore || !edge.vertical) return false;
+  const side = shoreSide(edge);
+  return isDeckBlock(side.block) && side.outward === (isOnLand(side.block.x + 12, side.block.z) ? -1 : 1);
+}).map((edge) => `${edge.x},${edge.z}`));
+export const widenedShore = new Set(edges.filter((edge) => edge.shore && !deckEdges.has(`${edge.x},${edge.z}`)).map((edge) => `${edge.x},${edge.z}`));
 const LANE_WIDTH = 1.5;
 
 export function createCity(scene) {
@@ -70,8 +80,14 @@ export function createCity(scene) {
     cube(c.x, 0.03, c.z, 12, 0.08, 12, '#252d35');
   }
   for (const b of blocks) {
-    const color = b.format === 'suburb' ? '#3c5040' : b.format === 'garden' ? '#496455' : b.format === 'market' ? '#666258' : b.format === 'plaza' ? '#496455' : b.format === 'dockyard' ? '#64665d' : '#555c62';
-    cube(b.x, 0.12, b.z, b.width, 0.22, b.depth, color);
+    const color = b.format === 'suburb' ? '#3c5040' : b.format === 'garden' ? '#496455' : b.format === 'market' ? '#666258' : b.format === 'plaza' ? '#496455' : b.format === 'dockyard' || b.format === 'containeryard' ? '#64665d' : '#555c62';
+    // Inside the 0.6 sidewalk ring (Tai's kit, laid in app.js). An avenue is two strips either side of its road.
+    if (b.format === 'avenue') {
+      const alongX = b.avenue === 'x';
+      for (const side of [-1, 1]) cube(b.x + (alongX ? 0 : side * 3), 0.12, b.z + (alongX ? side * 3 : 0), alongX ? b.width - 1.2 : 1.8, 0.22, alongX ? 1.8 : b.depth - 1.2, color);
+    } else {
+      cube(b.x, 0.12, b.z, b.width - 1.2, 0.22, b.depth - 1.2, color);
+    }
     if (b.format === 'terrace' || b.format === 'courtyard') for (const side of [-1, 1]) {
       const turned = b.format === 'terrace';
       cube(b.x + (turned ? side * 4.2 : 0), .12, b.z + (turned ? 0 : side * 4.2), turned ? .65 : 8, .22, turned ? 8 : .65, '#555c62');
@@ -85,8 +101,7 @@ export function createCity(scene) {
     if (b.format === 'avenue') {
       // The bridge's road carries straight on through the block, across both ring streets, with lane dashes.
       const alongX = b.avenue === 'x';
-      cube(b.x, 0.235, b.z, alongX ? 12 : 3, 0.03, alongX ? 3 : 12, '#252d35');
-      for (const t of [-4.5, -1.5, 1.5, 4.5]) cube(b.x + (alongX ? t : 0), 0.255, b.z + (alongX ? 0 : t), alongX ? 1.2 : .06, .01, alongX ? .06 : 1.2, '#b1a383');
+      for (const t of [-4.5, -1.5, 1.5, 4.5]) cube(b.x + (alongX ? t : 0), 0.085, b.z + (alongX ? 0 : t), alongX ? 1.2 : .06, .01, alongX ? .06 : 1.2, '#b1a383');
     }
   }
   // A thin sand border on the water side: a dry upper strip and a wet lower lip, overlapping at the corners.
@@ -110,23 +125,38 @@ export function createCity(scene) {
     if (!landAt.has(step(inner, end * 12, 0).join(','))) return 'outside';
     return landAt.has(step(inner, end * 12, outward * 12).join(',')) ? 'inside' : 'straight';
   };
-  const sandStrip = (edge, outward) => {
+  const sandStrip = (edge, outward, sand = true) => {
     const along = edge.vertical ? edge.z : edge.x;
     const ends = [-1, 1].map((end) => cornerKind(edge, outward, end));
-    for (const [from, to, y, height, color] of layers) {
+    for (const [from, to, y, height, color] of sand ? layers : layers.slice(0, 3)) {
       const reach = edge.vertical ? to : from; // how far past the corner this band runs (or stops short of it)
       const [start, stop] = [-1, 1].map((end, i) => along + end * (6 + (ends[i] === 'outside' ? reach : ends[i] === 'inside' ? -reach : 0)));
       const mid = (start + stop) / 2, length = stop - start;
       const across = (edge.vertical ? edge.x : edge.z) + outward * (from + to) / 2;
+      if (color === '#555c62') { // the sidewalk band: kit pieces, not a box
+        shoreSidewalks.push({ x: edge.vertical ? across : mid, z: edge.vertical ? mid : across, length, vertical: edge.vertical, outward });
+        continue;
+      }
       cube(edge.vertical ? across : mid, y, edge.vertical ? mid : across, edge.vertical ? to - from : length, height, edge.vertical ? length : to - from, color);
     }
     for (const offset of [-4.5, -1.5, 1.5, 4.5]) cube(edge.x + (edge.vertical ? 0 : offset), .085, edge.z + (edge.vertical ? offset : 0), edge.vertical ? .06 : 1.2, .015, edge.vertical ? 1.2 : .06, '#b1a383');
   };
   for (const edge of edges) {
-    const side = edge.shore && !isBeachEdge(edge) ? shoreSide(edge) : null;
+    const side = edge.shore ? shoreSide(edge) : null;
     if (side && !keepsSeawall(side.block)) {
-      sandStrip(edge, side.outward);
-    } else if (edge.shore && !isBeachEdge(edge)) {
+      sandStrip(edge, side.outward, !isBeachEdge(edge)); // a beach brings its own sand
+    } else if (side) {
+      // Working waterfronts reach the same line: the docks' deck covers what was the shore street out to the quay; Ace
+      // Chemicals keeps a widened street. Either way the seawall stands at the new quay edge.
+      if (deckEdges.has(`${edge.x},${edge.z}`)) {
+        const across = (edge.vertical ? edge.x : edge.z) + side.outward * (SHORE_SET_OUT - 1.5) / 2;
+        const length = 12 + 2 * SHORE_SET_OUT; // closes the corners; a hair above the street layers it may overlap there
+        cube(edge.vertical ? across : edge.x, 0.125, edge.vertical ? edge.z : across, edge.vertical ? SHORE_SET_OUT + 1.5 : length, 0.23, edge.vertical ? length : SHORE_SET_OUT + 1.5, '#64665d');
+        cube(edge.vertical ? across : edge.x, -0.89, edge.vertical ? edge.z : across, edge.vertical ? SHORE_SET_OUT + 1.5 : length, 1.82, edge.vertical ? length : SHORE_SET_OUT + 1.5, '#46515a');
+      } else {
+        sandStrip(edge, side.outward, false);
+      }
+      const quay = (edge.vertical ? edge.x : edge.z) + side.outward * SHORE_SET_OUT;
       // Open the seawall across every bridge approach (with its sidewalks): an east-west bridge crosses vertical edges,
       // a north-south one crosses horizontal edges.
       const along = edge.vertical ? edge.z : edge.x;
@@ -142,8 +172,8 @@ export function createCity(scene) {
         if (end <= start) continue;
         const mid = (start + end) / 2;
         const length = end - start;
-        cube(edge.vertical ? edge.x : mid, -.15, edge.vertical ? mid : edge.z, edge.vertical ? .25 : length, .45, edge.vertical ? length : .25, '#778c91');
-        cube(edge.vertical ? edge.x : mid, -.47, edge.vertical ? mid : edge.z, edge.vertical ? .6 : length, .025, edge.vertical ? length : .6, '#67969d');
+        cube(edge.vertical ? quay : mid, -.15, edge.vertical ? mid : quay, edge.vertical ? .25 : length, .45, edge.vertical ? length : .25, '#778c91');
+        cube(edge.vertical ? quay : mid, -.47, edge.vertical ? mid : quay, edge.vertical ? .6 : length, .025, edge.vertical ? length : .6, '#67969d');
       }
     } else if (!edge.shore) {
       for (const offset of [-4.5, -1.5, 1.5, 4.5]) cube(edge.x + (edge.vertical ? 0 : offset), .085, edge.z + (edge.vertical ? offset : 0), edge.vertical ? .06 : 1.2, .015, edge.vertical ? 1.2 : .06, '#b1a383');

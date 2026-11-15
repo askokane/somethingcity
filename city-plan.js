@@ -53,10 +53,28 @@ const landmarkSpecs = [
   ['Cobblepot Manor', 'cobblepot_manor_8bit.glb', [6, 1], 5], // Bristol Township, across the river
 ];
 
+// Shore streets are widened by a lane and a sidewalk (city-layout.js). So that bridges keep their length, the islands
+// with open sea behind them are pushed out across their bridged channel by that much for each shore: Bristol Township
+// west, South Hinkley south. The other landmasses sit between parts of the main island, so their bridges (and the two
+// across the inner bays) are fitted to the widened shores instead. cellPos/cornerPos give the pushed positions.
+export const SHORE_SET_OUT = 1.5 + 0.8;
+const PUSHED = { B: [-2 * SHORE_SET_OUT, 0], H: [0, 2 * SHORE_SET_OUT] };
+export const cellPos = (row, col) => {
+  const [dx, dz] = PUSHED[GOTHAM[row]?.[col]] ?? [0, 0];
+  return { x: cellX(col) + dx, z: cellZ(row) + dz };
+};
+// The north-west corner of cell (i, j), taken from whichever land cell touches it.
+export const cornerPos = (i, j) => {
+  const [r, c] = [[i, j], [i - 1, j], [i, j - 1], [i - 1, j - 1]].find(([r, c]) => REGIONS[GOTHAM[r]?.[c]]) ?? [i, j];
+  const p = cellPos(r, c);
+  return { x: p.x + (j - c) * BLOCK_SPACING - BLOCK_SPACING / 2, z: p.z + (i - r) * BLOCK_SPACING - BLOCK_SPACING / 2 };
+};
+
 export const landCells = GOTHAM.flatMap((line, row) => [...line].map((code, col) => {
   if (!REGIONS[code]) return null;
   const island = REGIONS[code];
-  return { sourceId: `${row},${col}`, row, col, x: cellX(col), z: cellZ(row), island, district: districtOf(island, col) };
+  const { x, z } = cellPos(row, col);
+  return { sourceId: `${row},${col}`, row, col, x, z, island, district: districtOf(island, col) };
 }).filter(Boolean));
 
 export const islands = Object.values(REGIONS).map((name) => {
@@ -84,8 +102,10 @@ export const bridgeSpans = [
 ];
 export const bridges = bridgeSpans.map(([[r1, c1], [r2, c2], style]) => {
   const vertical = c1 === c2; // runs north-south
-  const gap = (vertical ? Math.abs(r2 - r1) : Math.abs(c2 - c1)) * BLOCK_SPACING - BLOCK_SPACING;
-  return { x: (cellX(c1) + cellX(c2)) / 2, z: (cellZ(r1) + cellZ(r2)) / 2, length: gap + 1, width: 3, vertical, style };
+  const [a, b] = [cellPos(r1, c1), cellPos(r2, c2)];
+  // From widened shore to widened shore, overlapping each by half a unit.
+  const gap = (vertical ? Math.abs(b.z - a.z) : Math.abs(b.x - a.x)) - BLOCK_SPACING - 2 * SHORE_SET_OUT;
+  return { x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, length: gap + 1, width: 3, vertical, style };
 });
 
 export const blocks = landCells.map((c, i) => ({ ...c, cells: [c], width: 9, depth: 9, format: i % 11 === 5 ? 'terrace' : i % 13 === 7 ? 'courtyard' : 'standard' }));
@@ -115,7 +135,7 @@ merge(['12,6', '12,7'], 'market', 'Chinatown Market'); // Downtown west
 merge(['14,11', '14,12'], 'garden', 'Stevensburgh Green'); // Downtown, by the south shore
 // Wayne Tower's site: four blocks, so the tower keeps its real proportions (scaled evenly) and is still comically tall.
 merge(['12,11', '12,12', '13,11', '13,12'], 'landmark', 'Stevensburgh');
-for (const [id, format, district] of [['13,9', 'plaza', 'Founders Square'], ['12,16', 'dockyard', 'Haysville Docks'], ['13,6', 'dockyard', 'West Harlow Docks'], ['1,15', 'lighthouse', 'North Point Light']]) {
+for (const [id, format, district] of [['13,9', 'plaza', 'Founders Square'], ['13,16', 'dockyard', 'Haysville Docks'], ['12,16', 'containeryard', 'Haysville Container Yard'], ['13,6', 'dockyard', 'West Harlow Docks'], ['1,15', 'garden', 'North Point Park']]) {
   const b = blocks.find((block) => block.sourceId === id);
   b.format = format; b.district = district; b.width = b.depth = 9;
 }
@@ -141,7 +161,7 @@ for (const span of bridgeSpans) {
 }
 
 export const slots = blocks.flatMap((b, block) => {
-  const offsets = ['landmark','garden','plaza','dockyard','suburb','avenue','lighthouse'].includes(b.format) ? []
+  const offsets = ['landmark','garden','plaza','dockyard','containeryard','suburb','avenue'].includes(b.format) ? []
     : b.format === 'market' ? [[-7.5, 0], [-2.5, 0], [2.5, 0], [7.5, 0]]
     : b.format === 'terrace' ? [[0, -2.25], [0, 2.25]]
     : b.format === 'courtyard' ? [[-2.25, 0], [2.25, 0]]
