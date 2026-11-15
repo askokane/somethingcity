@@ -8,9 +8,12 @@ import { scatterSlotOrder, freshPlacementSeed, seededRandom as placementRandomGe
 import { checkAccount, checkSignedIn } from './checker/checker.js';
 import { buildMissions, readProgress, saveProgress, serviceUrl } from './mission-board.js';
 
-// Frontend and checker share an origin in production (Caddy proxies /api and /auth).
-// Leave the base empty so browser requests stay on the current host.
-const CHECKER_API = '';
+// Frontend and checker share an origin in production (Caddy proxies /api and /auth), so the base is empty there. Locally
+// the static server (serve.ps1, :8000) has no proxy, so the page talks to the checker on :8787 directly (it allows
+// localhost origins with credentials, and the two ports count as the same site for its cookie).
+const CHECKER_API = ['localhost', '127.0.0.1'].includes(location.hostname) && location.port !== '8787' ? 'http://localhost:8787' : '';
+// A reply that isn't JSON (a proxy's "Not found", the checker not running) becomes a plain message, not a parse error.
+const checkerJson = (response) => response.json().catch(() => ({ error: 'The checker service is not reachable right now. Try a demo address, or try again shortly.' }));
 let currentCheck = null;
 let verifiedEmail = '';
 let signedIn = false;
@@ -808,7 +811,7 @@ function coastLoop(margin) {
   return [[x1, z1], [x2, z1], [x2, z2], [x1, z2]];
 }
 const SHIPS = [
-  { file: 'horizon_container_ship_narrows', mode: 'pass', from: [150, -230], to: [150, 230], speed: 1.6, scale: 2.5 }, // a real ocean-going ship (~160 m), far offshore
+  { file: 'horizon_container_ship_narrows', mode: 'pass', from: [150, -230], to: [150, 230], speed: 1.6, scale: 1.4 }, // the biggest vessel (~90 m) without dwarfing the city's squeezed blocks
   // A tug on the run: racing round the island on its own lane (inside the ferry's), weaving hard like it's dodging the
   // GCPD. Five harbor patrol boats chase it in a staggered pack along its wake.
   { file: 'tugboat_east_quay', id: 'fugitive', mode: 'route', closed: true, points: coastLoop(24), speed: 15, weave: 5.5, jumps: true, scale: 1.3 },
@@ -3011,12 +3014,12 @@ async function requestCode() {
   if (email.toLowerCase().endsWith('@demo.test')) { error.textContent = 'Demo addresses need no code. Choose Run check instead.'; return; }
   try {
     const response = await fetch(`${CHECKER_API}/api/verify/start`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) });
-    const data = await response.json();
+    const data = await checkerJson(response);
     if (!response.ok) throw new Error(data.error || 'Could not send a code.');
     verifiedEmail = email;
     setVerificationStep(true);
     error.textContent = data.sent === 'email' ? 'Code sent. Check your email.' : 'Code generated. Check the checker service console.';
-  } catch (problem) { error.textContent = problem.message || 'Checker service is unavailable.'; }
+  } catch (problem) { error.textContent = problem instanceof TypeError ? 'The checker service is not reachable right now. Try a demo address, or try again shortly.' : problem.message || 'Checker service is unavailable.'; }
 }
 
 async function submitCheck(event) {
@@ -3030,7 +3033,7 @@ async function submitCheck(event) {
       const code = document.querySelector('#verify-code').value.trim();
       if (!code || email !== verifiedEmail) throw new Error('Send and enter a verification code first.');
       const response = await fetch(`${CHECKER_API}/api/verify/confirm`, { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, code }) });
-      const data = await response.json();
+      const data = await checkerJson(response);
       if (!response.ok) throw new Error(data.error || 'Could not verify this email.');
       result = await checkAccount(email, { endpoint: `${CHECKER_API}/api/check` });
     }
@@ -3082,7 +3085,7 @@ function installCheck(result) {
   const next = entries.map((entry, index) => {
     const citySlot = plotFor.get(index) ?? -1;
     const related = (result.breaches || []).filter((breach) => entry.breaches?.includes(breach.name));
-    return { id: `${result.id}-${index}`, name: entry.name, domain: entry.domain, label: result.label, district: citySlot >= 0 ? slots[citySlot].district : 'Beyond city plots', status: result.status === 'unknown' && !entry.domain ? 'unknown' : entry.breached ? 'breached' : 'clear', slot: citySlot, checkedAt: stamp, source: result.source, breaches: related.length ? related : (entry.breaches || []).map((name) => ({ name, date: 'Date unavailable', exposedData: [] })), foundIn: entry.foundIn || [], firstSeen: entry.firstSeen, error: result.error };
+    return { id: `${result.id}-${index}`, name: entry.name, domain: entry.domain, label: result.label, district: citySlot >= 0 ? slots[citySlot].district : 'Beyond city plots', status: result.status === 'unknown' && !entry.domain ? 'unknown' : entry.breached ? 'breached' : 'clear', slot: citySlot, checkedAt: stamp, source: result.source, breaches: related.length ? related : (entry.breaches || []).map((name) => ({ name, date: 'Date unavailable', exposedData: [] })), foundIn: entry.foundIn || [], firstSeen: entry.firstSeen, error: result.error, serviceBreaches: entry.serviceBreaches || [] };
   });
   accounts.splice(0, accounts.length, ...next.map(ageBreaches));
   accountsById.clear(); renderedBuildings.forEach((root) => scene.remove(root)); renderedBuildings.clear(); slotOccupants.clear();
@@ -3129,27 +3132,39 @@ function addAccount() {
 function showFeature(view) {
   const drawer = document.querySelector('#feature-drawer');
   const content = document.querySelector('#feature-content');
-  const titles = { accounts: 'Account directory', inbox: 'Inbox scan', timeline: 'Breach timeline', history: 'Historical breaches' };
+  const titles = { accounts: 'Account directory', inbox: 'Inbox scan', timeline: 'Breach timeline', history: 'Your breach history' };
+  const site = accountsById.get(selectedId);
   document.querySelectorAll('.nav-link[data-view]').forEach((node) => node.classList.toggle('is-active', node.dataset.view === view));
   if (view === 'overview') { drawer.hidden = true; return; }
   drawer.hidden = false;
-  content.innerHTML = `<p class="eyebrow">BREACHLINK / DATA DESK</p><h2>${titles[view]}</h2><p class="drawer-summary">${view === 'accounts' ? `${accounts.length} services in this account check.` : view === 'history' ? `Breaches older than ${RECENT_BREACH_MONTHS} months. These sites no longer count as breached in the city.` : view === 'inbox' ? 'Services found in welcome and account notification headers.' : 'Public breach activity by year from the Tiger Data catalog.'}</p><div id="feature-results" class="feature-results"><p class="drawer-empty">${view === 'timeline' ? 'Loading public timeline…' : 'Loading account data…'}</p></div>`;
+  content.innerHTML = `<p class="eyebrow">BREACHLINK / DATA DESK</p><h2>${titles[view]}</h2><p class="drawer-summary">${view === 'accounts' ? `${accounts.length} services in this account check.` : view === 'history' ? `Every breach that included your email, across all your websites, newest first. Breaches from the last ${RECENT_BREACH_MONTHS} months still mark a site as breached in the city.` : view === 'inbox' ? 'Services found in welcome and account notification headers.' : site ? `Every known breach of ${escapeHtml(site.name)}, newest first, from the Tiger Data breach catalog. Breaches that included your email are marked.` : 'Select a website in the city or the account directory to see its breach timeline.'}</p><div id="feature-results" class="feature-results"><p class="drawer-empty">Loading account data…</p></div>`;
   const results = document.querySelector('#feature-results');
   if (view === 'accounts') {
     results.innerHTML = accounts.length ? `<div class="feature-table"><div class="feature-table-head"><span>SERVICE</span><span>STATUS</span><span>SOURCE</span></div>${accounts.map((a) => `<button class="feature-table-row" type="button" data-account="${escapeHtml(a.id)}"><span><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(a.domain || a.label)}</small></span><b class="status-${a.status}">${accountBadge(a)}</b><small>${escapeHtml((a.foundIn || []).join(' + ') || a.source)}</small></button>`).join('')}</div>` : '<p class="drawer-empty">Run a check to populate the account directory.</p>';
     results.querySelectorAll('[data-account]').forEach((row) => row.addEventListener('click', () => { selectAccount(row.dataset.account); drawer.hidden = true; }));
   } else if (view === 'history') {
-    const old = accounts.flatMap((a) => a.historical.map((breach) => ({ a, breach }))).sort((x, y) => String(y.breach.date).localeCompare(String(x.breach.date)));
-    results.innerHTML = old.length ? `<div class="feature-table"><div class="feature-table-head"><span>SERVICE</span><span>BREACH</span><span>DATE</span></div>${old.map(({ a, breach }) => `<button class="feature-table-row" type="button" data-account="${escapeHtml(a.id)}"><span><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml((breach.exposedData || []).join(', ') || a.domain || a.label)}</small></span><b>${escapeHtml(breach.name)}</b><small>${escapeHtml(breach.date || 'Date unavailable')}</small></button>`).join('')}</div>` : '<p class="drawer-empty">No historical breaches in this check.</p>';
+    const old = accounts.flatMap((a) => [...(a.breaches || []).map((breach) => ({ a, breach, current: true })), ...(a.historical || []).map((breach) => ({ a, breach, current: false }))])
+      .sort((x, y) => String(y.breach.date).localeCompare(String(x.breach.date)));
+    results.innerHTML = old.length ? `<div class="feature-table"><div class="feature-table-head"><span>SERVICE</span><span>BREACH</span><span>DATE</span></div>${old.map(({ a, breach, current }) => `<button class="feature-table-row" type="button" data-account="${escapeHtml(a.id)}"><span><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml((breach.exposedData || []).join(', ') || a.domain || a.label)}</small></span><b>${escapeHtml(breach.name)}</b><small>${escapeHtml(breach.date || 'Date unavailable')}<br><span class="${current ? 'status-breached' : 'status-clear'}">${current ? 'CURRENT' : 'PAST'}</span></small></button>`).join('')}</div>` : '<p class="drawer-empty">No known breach included your email in this source. That only covers publicly reported breaches.</p>';
     results.querySelectorAll('[data-account]').forEach((row) => row.addEventListener('click', () => { selectAccount(row.dataset.account); showAccountReport(row.dataset.account); drawer.hidden = true; }));
   } else if (view === 'inbox') {
     const inboxAccounts = accounts.filter((a) => a.foundIn?.includes('inbox'));
     results.innerHTML = inboxAccounts.length ? `<div class="feature-table"><div class="feature-table-head"><span>SERVICE</span><span>FOUND</span><span>FIRST SEEN</span></div>${inboxAccounts.map((a) => `<div class="feature-table-row"><span><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(a.domain)}</small></span><b>${a.status === 'breached' ? 'INBOX + BREACH' : 'INBOX'}</b><small>${escapeHtml(a.firstSeen || 'Date unavailable')}</small></div>`).join('')}</div>` : `<p class="drawer-empty">${currentCheck ? 'No inbox data in this check. Sign in with Google and grant inbox access to scan your account.' : 'Run a check or sign in with Google to see services found in your inbox.'}</p>`;
   } else if (view === 'timeline') {
-    fetch(`${CHECKER_API}/api/timeline`).then((response) => response.ok ? response.json() : null).then((rows) => {
-      if (!rows || !Array.isArray(rows) || !rows.length) { results.innerHTML = '<p class="drawer-empty">Timeline unavailable. Connect the Tiger Data catalog to enable yearly breach totals.</p>'; return; }
-      results.innerHTML = `<div class="timeline-list">${rows.map((row) => `<article class="timeline-row"><strong>${escapeHtml(row.year)}</strong><span><b>${Number(row.breaches).toLocaleString()}</b> breaches</span><span>${Number(row.records).toLocaleString()} records exposed</span></article>`).join('')}</div>`;
-    }).catch(() => { results.innerHTML = '<p class="drawer-empty">Timeline service is offline. Start the checker service to load Tiger Data.</p>'; });
+    // The selected website's breach history: every known breach of the service (the check's serviceBreaches, from Tiger
+    // Data or the checker's catalog) merged with the breaches that included this user's email, newest first.
+    if (!site) { results.innerHTML = '<p class="drawer-empty">No website selected. Click a building in the city or a row in Accounts.</p>'; return; }
+    const mine = [...(site.breaches || []), ...(site.historical || [])];
+    const mineNames = new Set(mine.map((breach) => breach.name));
+    const rows = [...mine];
+    for (const breach of site.serviceBreaches || []) if (!mineNames.has(breach.name)) rows.push(breach);
+    rows.sort((x, y) => String(y.date).localeCompare(String(x.date)));
+    results.innerHTML = rows.length ? `<div class="timeline-list">${rows.map((breach) => {
+      const yours = mineNames.has(breach.name);
+      const year = /^\d{4}/.test(String(breach.date)) ? String(breach.date).slice(0, 4) : '—';
+      const records = Number(breach.records) > 0 ? `${Number(breach.records).toLocaleString()} records` : '';
+      return `<article class="timeline-row"><strong>${escapeHtml(year)}</strong><span><b>${escapeHtml(breach.name)}</b><br>${escapeHtml(breach.date || '')}${records ? ` · ${records}` : ''}<br>${escapeHtml((breach.exposedData || []).join(', '))}</span><span class="${yours ? 'status-breached' : 'status-unknown'}">${yours ? 'INCLUDED YOUR EMAIL' : 'SERVICE BREACH'}</span></article>`;
+    }).join('')}</div>` : `<p class="drawer-empty">No known breaches of ${escapeHtml(site.name)} in this source. That isn't a guarantee: it only covers publicly reported breaches.</p>`;
   }
 }
 
@@ -3269,6 +3284,55 @@ renderer.domElement.addEventListener('pointerup', (event) => {
     sendBatman((box.min.x + box.max.x) / 2, (box.min.z + box.max.z) / 2);
     landmarkReports[key]();
   }
+});
+
+// The Landmarks menu (nav): every landmark that opens something, with a one-line TL;DR. Choosing one does exactly what
+// clicking the building does: Batman heads over and its report opens.
+const LANDMARK_MENU = [
+  ['GCPD Headquarters', 'gcpd', 'Mission board: prioritized fixes for your breached sites, with links and progress.'],
+  ['Ace Chemicals', 'ace', 'Spill report: what data leaked across all your breached sites.'],
+  ['Gotham Bank', 'bank', 'Account vault: every site linked to your email, by when you joined.'],
+  ['Cobblepot Manor', 'cobblepot', 'Breach news: the latest publicly reported breaches.'],
+  ['Arkham Asylum', 'arkham', 'Reading room: what a breach match does and doesn\'t mean.'],
+  ['Wayne Tower', 'wayne', 'City atlas: a census of the map, independent of your check.'],
+];
+const landmarkButton = document.querySelector('#nav-landmarks');
+const landmarkMenu = document.createElement('div');
+landmarkMenu.id = 'landmark-menu';
+landmarkMenu.className = 'landmark-menu';
+landmarkMenu.setAttribute('role', 'menu');
+landmarkMenu.setAttribute('aria-label', 'Landmarks');
+landmarkMenu.hidden = true;
+landmarkMenu.innerHTML = LANDMARK_MENU.map(([name, key, tldr]) => `<button type="button" role="menuitem" data-landmark="${key}"><strong>${escapeHtml(name)}</strong><span>${escapeHtml(tldr)}</span></button>`).join('');
+document.body.append(landmarkMenu);
+function toggleLandmarkMenu(open = landmarkMenu.hidden) {
+  landmarkMenu.hidden = !open;
+  landmarkButton?.setAttribute('aria-expanded', String(open));
+  if (!open) return;
+  // Below the button, or above it when the nav sits at the bottom of the screen (phones); kept on screen.
+  const r = landmarkButton.getBoundingClientRect(), width = landmarkMenu.offsetWidth, height = landmarkMenu.offsetHeight;
+  landmarkMenu.style.left = `${Math.max(10, Math.min(r.left, innerWidth - width - 10))}px`;
+  landmarkMenu.style.top = `${r.bottom + height + 8 > innerHeight ? Math.max(10, r.top - height - 8) : r.bottom + 8}px`;
+  landmarkMenu.querySelector('button')?.focus();
+}
+landmarkButton?.addEventListener('click', (event) => { event.stopPropagation(); toggleLandmarkMenu(); });
+landmarkMenu.addEventListener('click', (event) => {
+  const item = event.target.closest('[data-landmark]');
+  if (!item) return;
+  const [name, key] = LANDMARK_MENU.find(([, k]) => k === item.dataset.landmark);
+  toggleLandmarkMenu(false);
+  const root = landmarkRoots.find((r) => r.userData.landmark === name);
+  if (root) { const box = new THREE.Box3().setFromObject(root); sendBatman((box.min.x + box.max.x) / 2, (box.min.z + box.max.z) / 2); }
+  landmarkReports[key]();
+});
+document.addEventListener('click', (event) => { if (!landmarkMenu.hidden && !landmarkMenu.contains(event.target)) toggleLandmarkMenu(false); });
+document.addEventListener('keydown', (event) => {
+  if (landmarkMenu.hidden) return;
+  if (event.key === 'Escape') { toggleLandmarkMenu(false); landmarkButton.focus(); return; }
+  if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+  event.preventDefault(); // arrow keys move between items
+  const items = [...landmarkMenu.querySelectorAll('button')], at = items.indexOf(document.activeElement);
+  items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
 });
 
 function resizeScene() {
