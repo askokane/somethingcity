@@ -165,6 +165,51 @@ function addPlacedModel(source, position, scale = 1, rotationY = 0) {
   return root;
 }
 
+// Merge a static model in place: every mesh under `root` becomes part of one mesh per material (geometry baked into
+// root's space), so a 900-piece model draws in a handful of calls. Meshes under a node whose name matches `keep` stay
+// separate (named after that node, so code can still find them, e.g. a cruiser's flashing lenses). Lights are dropped.
+// A material whose pieces can't merge (mismatched attributes) keeps them as they are.
+function mergeByMaterial(root, keep = null) {
+  root.updateMatrixWorld(true);
+  const toRoot = root.matrixWorld.clone().invert();
+  const groups = new Map(), kept = [];
+  root.traverse((node) => {
+    if (!node.isMesh || node.isSkinnedMesh || node.isInstancedMesh || Array.isArray(node.material)) return;
+    let named = null;
+    for (let n = node; n && n !== root; n = n.parent) if (keep && keep.test(n.name)) { named = n.name; break; }
+    const matrix = toRoot.clone().multiply(node.matrixWorld);
+    if (named) { kept.push({ node, matrix, name: named }); return; }
+    if (!groups.has(node.material)) groups.set(node.material, []);
+    groups.get(node.material).push({ node, matrix });
+  });
+  const merged = [];
+  for (const [material, list] of groups) {
+    const geometries = list.map(({ node, matrix }) => {
+      const g = (node.geometry.index ? node.geometry.toNonIndexed() : node.geometry.clone()).applyMatrix4(matrix);
+      return g;
+    });
+    // Only attributes every piece has (some pieces lack uv, say), or mergeGeometries refuses.
+    const common = Object.keys(geometries[0].attributes).filter((name) => geometries.every((g) => g.attributes[name]));
+    geometries.forEach((g) => Object.keys(g.attributes).forEach((name) => { if (!common.includes(name)) g.deleteAttribute(name); }));
+    const geometry = list.length > 1 ? mergeGeometries(geometries, false) : geometries[0];
+    if (!geometry) { list.forEach((entry) => kept.push({ ...entry, name: entry.node.name })); continue; }
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = list.some(({ node }) => node.castShadow);
+    mesh.receiveShadow = list.some(({ node }) => node.receiveShadow);
+    merged.push(mesh);
+  }
+  const separate = kept.map(({ node, matrix, name }) => {
+    const mesh = new THREE.Mesh(node.geometry, node.material);
+    mesh.name = name;
+    matrix.decompose(mesh.position, mesh.quaternion, mesh.scale);
+    mesh.castShadow = node.castShadow; mesh.receiveShadow = node.receiveShadow;
+    return mesh;
+  });
+  [...root.children].forEach((child) => root.remove(child));
+  [...merged, ...separate].forEach((mesh) => root.add(mesh));
+  return root;
+}
+
 // Many copies of one model for a few draw calls: one InstancedMesh per piece of the model, one instance per placement
 // [x, y, z, rotationY]. The model is prepared once like addPlacedModel (stood up, scaled, bottom-centered at the origin).
 function instanceModel(source, scale, placements, group) {
@@ -811,7 +856,7 @@ function coastLoop(margin) {
   return [[x1, z1], [x2, z1], [x2, z2], [x1, z2]];
 }
 const SHIPS = [
-  { file: 'horizon_container_ship_narrows', mode: 'pass', from: [150, -230], to: [150, 230], speed: 1.6, scale: 1.4 }, // the biggest vessel (~90 m) without dwarfing the city's squeezed blocks
+  { file: 'horizon_container_ship_narrows', mode: 'pass', from: [150, -230], to: [150, 230], speed: 1.6, scale: 0.6 }, // ~17 units, about a block and a half: still the biggest boat, in proportion to the city's blocks
   // A tug on the run: racing round the island on its own lane (inside the ferry's), weaving hard like it's dodging the
   // GCPD. Five harbor patrol boats chase it in a staggered pack along its wake.
   { file: 'tugboat_east_quay', id: 'fugitive', mode: 'route', closed: true, points: coastLoop(24), speed: 15, weave: 5.5, jumps: true, scale: 1.3 },
@@ -1559,7 +1604,9 @@ const cars = [];
 async function spawnTraffic() {
   const load = (file) => loadModel(`./models/everything-else/${file}.glb`).catch(() => null);
   const [civilian, police] = await Promise.all([load('gotham_civilian_cars'), load('gotham_police_cruiser')]);
-  const models = [...(civilian?.children ?? []).map((car) => [car, 1]), ...(police?.children ?? []).map((car) => [car, 0.55])];
+  // Each car merged by material once (~30 pieces -> a handful), the cruisers' lenses kept apart so they can flash.
+  const merge = (car) => mergeByMaterial(car.clone(true), /lens/i);
+  const models = [...(civilian?.children ?? []).map((car) => [merge(car), 1]), ...(police?.children ?? []).map((car) => [merge(car), 0.55])];
   if (!models.length) return;
   if (police?.children.length) policeModel = models[models.length - 1];
   for (let i = 0; i < CAR_COUNT + COP_COUNT; i++) addCar(...(i < CAR_COUNT ? models[i % Math.max(1, models.length - 1)] : models[models.length - 1]), i >= CAR_COUNT);
@@ -1972,7 +2019,7 @@ function makeHeli(phase) {
   const heli = new THREE.Group();
   const body = heliModel.clone(true);
   body.scale.setScalar(HELI.scale);
-  body.traverse((node) => { if (node.isMesh) node.raycast = () => {}; });
+  body.traverse((node) => { if (node.isMesh) node.raycast = () => {}; if (node.isLight) node.visible = false; }); // its spotlight lit every pixel
   heli.add(body);
   heli.rotation.order = 'YXZ';
   const mixer = new THREE.AnimationMixer(body);
@@ -2094,6 +2141,12 @@ loader.load('./models/buildings/gotham_voxel_skyscraper.glb', async (gltf) => {
         ? Math.min(landmark.height / size.y, (Math.min(block.width, block.depth) - 1.2) / Math.max(size.x, size.z)) // even scale, fits one block
         : [(block.width - 1.2) / size.x, landmark.height / size.y, (block.depth - 1.2) / size.z];
     const root = addPlacedModel(source, [block.x, 0.23, block.z], scale, faceToward(source, YAW_SOUTH)); // landmarks face south
+    // One mesh per material instead of hundreds of pieces (Cobblepot Manor alone was 904 draw calls). Merged in a child so
+    // the root keeps its placement transform.
+    const parts = new THREE.Group();
+    [...root.children].forEach((child) => parts.add(child));
+    root.add(parts);
+    mergeByMaterial(parts);
     flickerWindows(root);
     root.userData.landmark = landmark.name;
     const label = landmarkLabel(landmark.name); label.position.set(block.x, new THREE.Box3().setFromObject(root).max.y + 0.8, block.z); scene.add(label);
