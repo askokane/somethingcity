@@ -1,4 +1,4 @@
-// City planner: a blueprint of Breach City for planning buildings, sizes and variables. Not the live app.
+// City planner: a blueprint of BreachLink for planning buildings, sizes and variables. Not the live app.
 // Website towers get their height from account age (older account = taller); landmarks get a spec for Daniel's models.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';

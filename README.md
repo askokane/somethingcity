@@ -1,6 +1,6 @@
-# Breach City
+# BreachLink
 
-**See your digital exposure as a city.** Breach City turns a verified account check into an interactive isometric Gotham city. Each linked service is represented in the dashboard, while Blender-built blocks, account towers, landmarks, and street details give the city its shape.
+**See your digital exposure as a city.** BreachLink turns a verified account check into an interactive isometric Gotham city. Each linked service is represented in the dashboard, while Blender-built blocks, account towers, landmarks, and street details give the city its shape.
 
 Hackathon project for Emory Hacks. The plan and privacy rules are in [planning.md](docs/planning.md).
 

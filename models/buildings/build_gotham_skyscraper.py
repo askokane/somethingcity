@@ -1,4 +1,4 @@
-"""Build the 4 x 4 x 6 m Breach City voxel skyscraper in Blender."""
+"""Build the 4 x 4 x 6 m BreachLink voxel skyscraper in Blender."""
 
 import bpy
 import math

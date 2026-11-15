@@ -1,10 +1,10 @@
-﻿# Breach City — Hackathon Planning Doc
+﻿# BreachLink — Hackathon Planning Doc
 
 ## Product idea
 
 Build a browser-based cybersecurity awareness experience inspired by city-building games. A user adds accounts they want to monitor, the app checks whether the account identifier appears in a permitted breach dataset/API, and results become visible in a small 3D city. The city is a memorable dashboard: each website linked to the user's email (found from breach data and, with consent, their inbox) is a skyscraper with its name on it, and a breach changes that building's state (red: your data leaked; amber: the service was breached) and opens a readable incident panel with the service, breach date, exposed data categories (when available), and practical next steps. A few special landmark buildings hold the dashboard panels.
 
-**Working name:** Breach City (placeholder)
+**Working name:** BreachLink (placeholder)
 
 **One-line pitch:** See your digital exposure at a glance: every account is a building, and breach history changes the neighborhood.
 

@@ -1,4 +1,4 @@
-// Breach City account checker. Plain ES module: works in the browser and in Node 20+, no build step.
+// BreachLink account checker. Plain ES module: works in the browser and in Node 20+, no build step.
 import { CITY } from "./demo-city.js";
 
 /**

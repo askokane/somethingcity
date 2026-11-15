@@ -23,7 +23,7 @@ body{background:#101a25}
 .stage-topline,.scene-caption,.scene-controls{display:none!important}
 .city-stage::after{background:linear-gradient(180deg,#0e1a2622 0%,transparent 22%,transparent 78%,#0e1a2633 100%)}
 .loading-overlay{background:#122535}
-/* Breach City navigation and data desk */
+/* BreachLink navigation and data desk */
 .topbar{display:flex!important;position:fixed;z-index:20;top:0;left:0;right:0;height:64px;padding:0 22px;border:0;background:linear-gradient(180deg,#101a25ee,#101a2599,transparent);box-shadow:none}
 .brand{background:#132738d9;padding:6px 9px;border:2px solid #416174;box-shadow:3px 3px 0 #080f16}
 .main-nav{position:fixed;z-index:21;top:10px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:3px;padding:5px;background:#132738ed;border:2px solid #416174;box-shadow:4px 4px 0 #080f16;white-space:nowrap}

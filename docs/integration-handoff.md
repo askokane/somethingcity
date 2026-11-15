@@ -1,4 +1,4 @@
-# Breach City Integration Handoff
+# BreachLink Integration Handoff
 
 Use this as the shared reference when connecting the checker and exported art to the frontend. The gray-box app can continue independently against fixtures.
 

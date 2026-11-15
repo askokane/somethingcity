@@ -1,7 +1,7 @@
 ﻿# Atharva — Overall Integration Instructions
 
 ## Mission
-Own the end-to-end Breach City experience and frontend implementation. Integrate Tai’s city world, NPCs, streets, and UI visual assets with Daniel’s account buildings and Justin’s account checker into a reliable hackathon demo.
+Own the end-to-end BreachLink experience and frontend implementation. Integrate Tai’s city world, NPCs, streets, and UI visual assets with Daniel’s account buildings and Justin’s account checker into a reliable hackathon demo.
 
 ## Step-by-step prompting workflow
 Use these prompts in order, keeping the shared contract and conventions visible to every contributor:

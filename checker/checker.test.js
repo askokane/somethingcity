@@ -221,12 +221,12 @@ if (process.env.LIVE || process.argv.includes("--live")) {
   console.log(`live: ${r.breaches.length} breaches -> ${r.accounts.length} accounts, e.g. ${r.accounts.slice(0, 3).map((a) => a.name).join(", ")}`);
 
   const { checkXon } = await import("./sources.js");
-  assert.equal((await checkXon("zq7x9k2m4breachcity@example.com")).status, "clear");
+  assert.equal((await checkXon("zq7x9k2m4breachlink@example.com")).status, "clear");
   // Cached: the repeat check makes no request (no "xon" log line) and returns the same answer
   const logged = [];
   const realLog = console.log;
   console.log = (...a) => logged.push(a.join(" "));
-  const again = await checkXon("zq7x9k2m4breachcity@example.com");
+  const again = await checkXon("zq7x9k2m4breachlink@example.com");
   console.log = realLog;
   assert.equal(again.status, "clear");
   assert.ok(!logged.some((l) => l.startsWith("xon")));

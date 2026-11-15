@@ -1,7 +1,7 @@
 ﻿# Tai — City World, NPCs, Streets, and UI Instructions
 
 ## Mission
-Create the supporting city world and visual presentation for the Breach City demo. Own streets, NPCs, city props, and UI design/assets. Coordinate with Daniel, who owns the reusable account buildings, and Atharva, who owns frontend implementation and integration.
+Create the supporting city world and visual presentation for the BreachLink demo. Own streets, NPCs, city props, and UI design/assets. Coordinate with Daniel, who owns the reusable account buildings, and Atharva, who owns frontend implementation and integration.
 
 ## Step-by-step prompting workflow
 Use these prompts in order, sharing the relevant agreed conventions and files at each step:

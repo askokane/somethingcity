@@ -12,6 +12,6 @@ your-domain.com {
 	reverse_proxy @backend localhost:8787
 
 	# The frontend and checker/checker.js, served as plain files
-	root * /srv/breach-city
+	root * /srv/breachlink
 	file_server
 }

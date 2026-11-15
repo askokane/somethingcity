@@ -1,4 +1,4 @@
-# Deploying Breach City on Vultr
+# Deploying BreachLink on Vultr
 
 This deploys the static Three.js frontend and optional Node checker on one Ubuntu server. Caddy serves the files, proxies `/api/*` and `/auth/*` to the checker, and obtains HTTPS certificates for your domain.
 
@@ -36,18 +36,18 @@ apt install -y caddy
 The repository must be public or otherwise cloneable by the server. For a private repository, configure a read-only GitHub deploy key before cloning.
 
 ```bash
-useradd --system --no-create-home --shell /usr/sbin/nologin breachcity
-git clone https://github.com/askokane/somethingcity.git /srv/breach-city
-cd /srv/breach-city/checker
+useradd --system --no-create-home --shell /usr/sbin/nologin breachlink
+git clone https://github.com/askokane/somethingcity.git /srv/breachlink
+cd /srv/breachlink/checker
 npm ci --omit=dev
 ```
 
 ## 4. Configure optional credentials
 
-The demo frontend works without credentials. To enable live email verification, Google sign-in, or database-backed timeline features, create `/etc/breach-city.env` on the server:
+The demo frontend works without credentials. To enable live email verification, Google sign-in, or database-backed timeline features, create `/etc/breachlink.env` on the server:
 
 ```bash
-nano /etc/breach-city.env
+nano /etc/breachlink.env
 ```
 
 Add only the settings for features you configured. For example:
@@ -55,7 +55,7 @@ Add only the settings for features you configured. For example:
 ```ini
 PUBLIC_URL=https://example.com
 RESEND_API_KEY=your_resend_api_key
-EMAIL_FROM=Breach City <you@example.com>
+EMAIL_FROM=BreachLink <you@example.com>
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 DATABASE_URL=your_database_connection_string
@@ -64,8 +64,8 @@ DATABASE_URL=your_database_connection_string
 Replace `example.com` and the sample values. Omit any setting for an unused feature. Do not commit this file or put credentials in the repository. Save and close nano, then lock down the file:
 
 ```bash
-chown root:root /etc/breach-city.env
-chmod 600 /etc/breach-city.env
+chown root:root /etc/breachlink.env
+chmod 600 /etc/breachlink.env
 ```
 
 If you want Google sign-in, in Google Cloud Console add `https://YOUR_DOMAIN/auth/google/callback` as an authorized redirect URI and add `YOUR_DOMAIN` to authorized domains. Add user Gmail addresses as test users if the OAuth app is still in Testing mode. Keep any existing localhost redirect URI for local development. Set `PUBLIC_URL` even if you do not use optional credentials; it enables secure cookies and turns off the checker’s development page.
@@ -73,14 +73,14 @@ If you want Google sign-in, in Google Cloud Console add `https://YOUR_DOMAIN/aut
 ## 5. Start the checker service
 
 ```bash
-cp /srv/breach-city/deploy/breach-city.service /etc/systemd/system/breach-city.service
+cp /srv/breachlink/deploy/breachlink.service /etc/systemd/system/breachlink.service
 systemctl daemon-reload
-systemctl enable --now breach-city
-systemctl status breach-city --no-pager
-journalctl -u breach-city -n 30 --no-pager
+systemctl enable --now breachlink
+systemctl status breachlink --no-pager
+journalctl -u breachlink -n 30 --no-pager
 ```
 
-The checker listens only on localhost port 8787. The systemd service reads secrets from `/etc/breach-city.env`; that file is outside the web root.
+The checker listens only on localhost port 8787. The systemd service reads secrets from `/etc/breachlink.env`; that file is outside the web root.
 
 ## 6. Configure Caddy and HTTPS
 
@@ -102,7 +102,7 @@ example.com, www.example.com {
     @backend path /api/* /auth/*
     reverse_proxy @backend localhost:8787
 
-    root * /srv/breach-city
+    root * /srv/breachlink
     file_server
 }
 ```
@@ -130,11 +130,11 @@ The first request should return JSON. The second should return `404`. If HTTPS i
 SSH into the server and run:
 
 ```bash
-cd /srv/breach-city
+cd /srv/breachlink
 git pull --ff-only
 cd checker
 npm ci --omit=dev
-systemctl restart breach-city
+systemctl restart breachlink
 ```
 
 ## Feature notes

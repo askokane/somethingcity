@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#11161d" />
-    <title>Breach City — Gotham Ward</title>
+    <title>BreachLink — Gotham Ward</title>
     <link rel="stylesheet" href="styles.css" />
     <link rel="stylesheet" href="city-stats.css" />
     <script type="importmap">
@@ -17,7 +17,7 @@
   <body>
     <main class="app-shell">
       <header class="topbar">
-        <a class="brand" href="#" aria-label="Breach City home"><span class="brand-mark">B</span><span class="brand-word">BREACH<span>CITY</span></span></a>
+        <a class="brand" href="#" aria-label="BreachLink home"><span class="brand-mark">B</span><span class="brand-word">BREACH<span>LINK</span></span></a>
         <span class="ward-tag"><i></i> GOTHAM · CENTRAL WARD</span>
         <div class="header-actions"><span class="demo-label">LOCAL DEMO</span><button class="header-button" id="reset-button" type="button" title="Reset demo">↺</button><button class="run-button" id="check-button" type="button"><span>↻</span> Run checks</button></div>
       </header>
@@ -41,7 +41,7 @@
           <div class="stage-topline"><span><i class="north-star">✳</i> WARD 04 <b>/</b> RIVER DISTRICT</span><button id="camera-button" type="button" aria-label="Reset camera view">⌖ <span>RESET VIEW</span></button></div>
           <div id="city-scene" class="city-scene" aria-label="Interactive 3D Gotham city scene"></div>
           <div class="loading-overlay" id="loading-overlay"><span class="loading-mark">B</span><strong>RAISING THE CITY</strong><small>Loading Blender buildings…</small></div>
-          <button class="bat-status" id="bat-status" type="button" aria-haspopup="dialog" aria-label="Open the Breach City demo and breach dashboard" aria-live="polite"><svg class="bat-mascot" id="bat-mascot" viewBox="0 0 16 16" shape-rendering="crispEdges" role="img" aria-label="Batman"></svg><span class="bat-status-copy"><span>BAT-STATUS</span><strong id="bat-status-title">Gotham</strong><small id="bat-status-detail">Scanning the city…</small><span class="bat-status-hint">OPEN BRIEFING ↗</span></span></button>
+          <button class="bat-status" id="bat-status" type="button" aria-haspopup="dialog" aria-label="Open the BreachLink demo and breach dashboard" aria-live="polite"><svg class="bat-mascot" id="bat-mascot" viewBox="0 0 16 16" shape-rendering="crispEdges" role="img" aria-label="Batman"></svg><span class="bat-status-copy"><span>BAT-STATUS</span><strong id="bat-status-title">Gotham</strong><small id="bat-status-detail">Scanning the city…</small><span class="bat-status-hint">OPEN BRIEFING ↗</span></span></button>
           <div class="scene-caption"><span><i class="legend-building"></i> ACCOUNT BUILDINGS</span><span><i class="legend-river"></i> GOTHAM RIVER</span><span><i class="legend-road"></i> CITY STREETS</span></div>
           <div class="scene-controls"><span>ISOMETRIC VIEW</span><span>1 UNIT = 1 METER</span></div>
         </div>
@@ -59,12 +59,12 @@
             <div class="report-status" id="detail-status"><span class="status-symbol">✓</span><span>No known match in this source</span></div>
             <div class="report-meta"><div><span>CHECK SOURCE</span><strong id="detail-source">Demo fixture</strong></div><div><span>LAST CHECK</span><strong id="detail-checked">10:42 AM</strong></div></div>
             <div class="incident-block" id="incident-block" hidden><div class="incident-title"><span>⚑</span> MATCH DETAILS</div><div id="incident-content"></div></div>
-            <div class="action-block"><p class="eyebrow">RECOMMENDED NEXT STEPS</p><ul><li>Use a unique password for this service.</li><li>Turn on multi-factor authentication.</li><li>Review recent account activity.</li></ul><small>These are suggestions. Breach City has not changed the account.</small></div>
+            <div class="action-block"><p class="eyebrow">RECOMMENDED NEXT STEPS</p><ul><li>Use a unique password for this service.</li><li>Turn on multi-factor authentication.</li><li>Review recent account activity.</li></ul><small>These are suggestions. BreachLink has not changed the account.</small></div>
           </section>
         </aside>
       </section>
 
-      <footer class="page-footer"><span>BREACH CITY <i>·</i> YOUR DIGITAL FOOTPRINT, MADE VISIBLE</span><span>RESULTS REFLECT THE SELECTED SOURCE ONLY</span></footer>
+      <footer class="page-footer"><span>BREACHLINK <i>·</i> YOUR DIGITAL FOOTPRINT, MADE VISIBLE</span><span>RESULTS REFLECT THE SELECTED SOURCE ONLY</span></footer>
       <section class="feature-drawer" id="feature-drawer" hidden aria-live="polite"><button class="drawer-close" id="drawer-close" type="button" aria-label="Close view">×</button><div id="feature-content"></div></section>
       <section class="verify-modal" id="verify-modal" hidden><form class="verify-card" id="verify-form"><button class="drawer-close" id="verify-close" type="button" aria-label="Close">×</button><p class="eyebrow">OWNERSHIP CHECK</p><h2>Check an account</h2><p>Use a demo address for an offline preview, or verify an address you own to run a live breach check.</p><div class="demo-shortcuts"><button type="button" data-demo="breached@demo.test">Breached demo</button><button type="button" data-demo="clear@demo.test">Clear demo</button><button type="button" data-demo="unknown@demo.test">Unknown demo</button></div><label for="verify-email">Email address</label><input id="verify-email" type="email" autocomplete="email" required placeholder="you@example.com" /><label for="verify-code" id="code-label" hidden>6 digit email code</label><input id="verify-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000" hidden /><p class="form-error" id="verify-error" role="alert"></p><div class="verify-actions"><button class="header-button" id="send-code" type="button">Send verification code</button><button class="run-button" id="submit-check" type="submit">Run check</button></div><small>We only display your masked address. We never ask for passwords.</small></form></section>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -89,7 +89,7 @@
       </div>
       <section class="bat-deck-backdrop" id="bat-deck" hidden aria-hidden="true">
         <div class="bat-deck-dialog" role="dialog" aria-modal="true" aria-labelledby="deck-title" aria-describedby="deck-description" tabindex="-1">
-          <header class="deck-topbar"><span><i></i> BREACH CITY / PRODUCT BRIEFING</span><span id="deck-counter">01 / 04</span><button type="button" id="deck-close" aria-label="Close presentation">×</button></header>
+          <header class="deck-topbar"><span><i></i> BREACHLINK / PRODUCT BRIEFING</span><span id="deck-counter">01 / 04</span><button type="button" id="deck-close" aria-label="Close presentation">×</button></header>
           <div class="deck-content" id="deck-content"></div>
           <footer class="deck-footer"><span>DEMO DATA · ILLUSTRATIVE, NOT A LIVE INCIDENT FEED</span><nav aria-label="Presentation slides"><button id="deck-prev" type="button">← PREVIOUS</button><div id="deck-dots"></div><button id="deck-next" type="button">NEXT →</button></nav></footer>
         </div>

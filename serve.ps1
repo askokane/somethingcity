@@ -3,7 +3,7 @@ $rootPath = (Resolve-Path $PSScriptRoot).Path.TrimEnd('\')
 $rootPrefix = $rootPath + '\'
 $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 8000)
 $listener.Start()
-Write-Host "Breach City preview: http://127.0.0.1:8000/  (Ctrl+C to stop)"
+Write-Host "BreachLink preview: http://127.0.0.1:8000/  (Ctrl+C to stop)"
 
 while ($true) {
     $client = $listener.AcceptTcpClient()
