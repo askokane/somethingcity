@@ -664,6 +664,105 @@ function seaHeight(x, z, time) {
 }
 const fleet = [];
 let fleetLaunched = false;
+const WAKE_PARTICLES_PER_SHIP = 10;
+let wakePositions = null;
+let wakeColors = null;
+let wakePositionAttribute = null;
+let wakeColorAttribute = null;
+let wakePoints = null;
+const wakeColor = new THREE.Color();
+const wakeFoamColor = new THREE.Color('#d7edf2');
+const wakeWaterColor = new THREE.Color('#103e4c');
+
+function createWakeTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 32;
+  const context = canvas.getContext('2d');
+  const gradient = context.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gradient.addColorStop(0, 'rgba(255,255,255,0.82)');
+  gradient.addColorStop(0.42, 'rgba(255,255,255,0.5)');
+  gradient.addColorStop(1, 'rgba(255,255,255,0)');
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 32, 32);
+  return new THREE.CanvasTexture(canvas);
+}
+
+function initializeBoatWakes() {
+  const movingShips = fleet.filter((ship) => ship.mode !== 'moored' && ship.mode !== 'drift');
+  if (!movingShips.length) return;
+  const count = movingShips.length * WAKE_PARTICLES_PER_SHIP;
+  wakePositions = new Float32Array(count * 3);
+  wakeColors = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    wakePositions[i * 3 + 1] = -10000;
+    wakeColors[i * 3] = wakeWaterColor.r;
+    wakeColors[i * 3 + 1] = wakeWaterColor.g;
+    wakeColors[i * 3 + 2] = wakeWaterColor.b;
+  }
+  const geometry = new THREE.BufferGeometry();
+  wakePositionAttribute = new THREE.BufferAttribute(wakePositions, 3).setUsage(THREE.DynamicDrawUsage);
+  wakeColorAttribute = new THREE.BufferAttribute(wakeColors, 3).setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('position', wakePositionAttribute);
+  geometry.setAttribute('color', wakeColorAttribute);
+  const material = new THREE.PointsMaterial({
+    map: createWakeTexture(),
+    color: 0xffffff,
+    size: 4,
+    transparent: true,
+    opacity: 0.48,
+    vertexColors: true,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  wakePoints = new THREE.Points(geometry, material);
+  wakePoints.name = 'Boat wakes';
+  wakePoints.frustumCulled = false;
+  scene.add(wakePoints);
+  movingShips.forEach((ship, shipIndex) => {
+    ship.wakeParticles = Array.from({ length: WAKE_PARTICLES_PER_SHIP }, (_, particleIndex) => ({
+      index: shipIndex * WAKE_PARTICLES_PER_SHIP + particleIndex,
+      active: false,
+      born: 0,
+      life: 0,
+      x: 0,
+      z: 0,
+    }));
+    ship.wakeCursor = 0;
+    ship.nextWakeAt = 0;
+  });
+}
+
+function updateBoatWake(ship, time, x, z, fx, fz) {
+  if (!ship.wakeParticles || !wakePositionAttribute || !wakeColorAttribute) return;
+  if (time >= ship.nextWakeAt) {
+    const particle = ship.wakeParticles[ship.wakeCursor];
+    const lateral = (Math.random() - 0.5) * 0.9;
+    particle.active = true;
+    particle.born = time;
+    particle.life = 1.55 + Math.random() * 0.3;
+    particle.x = x - fx * (ship.length / 2 + 0.35) - fz * lateral;
+    particle.z = z - fz * (ship.length / 2 + 0.35) + fx * lateral;
+    ship.wakeCursor = (ship.wakeCursor + 1) % WAKE_PARTICLES_PER_SHIP;
+    ship.nextWakeAt = time + 0.2;
+  }
+  for (const particle of ship.wakeParticles) {
+    const offset = particle.index * 3;
+    const age = time - particle.born;
+    if (!particle.active || age >= particle.life) {
+      particle.active = false;
+      wakePositions[offset + 1] = -10000;
+      continue;
+    }
+    wakePositions[offset] = particle.x;
+    wakePositions[offset + 1] = seaHeight(particle.x, particle.z, time) + 0.035;
+    wakePositions[offset + 2] = particle.z;
+    wakeColor.copy(wakeFoamColor).lerp(wakeWaterColor, Math.min(1, age / particle.life));
+    wakeColors[offset] = wakeColor.r;
+    wakeColors[offset + 1] = wakeColor.g;
+    wakeColors[offset + 2] = wakeColor.b;
+  }
+}
+
 async function launchShips() {
   if (fleetLaunched) return;
   fleetLaunched = true;
@@ -698,6 +797,7 @@ async function launchShips() {
     }
     fleet.push({ ...spec, model, length, phase: i * 1.7, anchor, curve });
   }));
+  initializeBoatWakes();
 }
 function updateShips(time) {
   for (const ship of fleet) {
@@ -745,7 +845,10 @@ function updateShips(time) {
     ship.model.position.set(x, (bow + stern) / 2 - SHIP_DRAFT, z);
     // Pitch with the bow and stern heights, roll with the sides, kept gentle.
     ship.model.rotation.set(Math.atan2(port - starboard, 2) * 0.6, yaw, Math.atan2(bow - stern, ship.length) * 0.8);
+    updateBoatWake(ship, time, x, z, fx, fz);
   }
+  if (wakePositionAttribute) wakePositionAttribute.needsUpdate = true;
+  if (wakeColorAttribute) wakeColorAttribute.needsUpdate = true;
 }
 
 // Wayne Manor: Daniel's Batcave exterior is the manor standing on a cliff with the cave inside. Scaled to Wayne Estate's
