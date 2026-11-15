@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { beaches, beachPoint } from './coastal-plan.js';
 import { blocks, isOnLand } from './city-plan.js';
+import { BEACH_SET_OUT as QUAY_OUT } from './coastal-plan.js'; // the widened shore street: the quay is this far out
 
 export async function createCoastalScene() {
   const loader = new GLTFLoader();
@@ -36,7 +37,8 @@ export async function createCoastalScene() {
     waterfrontGroup.add(model); return model;
   }
   for (const beach of beaches) {
-    const patch = place('Beach_Sand_Patch', beach.x, 0, beach.z, beach.rotation);
+    const origin = beachPoint(beach, 0, 0);
+    const patch = place('Beach_Sand_Patch', origin.x, 0, origin.z, beach.rotation);
     patch.name = beach.name;
     const local = (name, x, y, z, angle = 0, scale = 1) => {
       const p = beachPoint(beach, x, z); return place(name, p.x, y, p.z, beach.rotation + angle, scale);
@@ -65,9 +67,16 @@ export async function createCoastalScene() {
   }
 
   // Atharva's waterfront kit, anchored to the Gotham map's blocks rather than fixed coordinates.
-  // The lighthouse has its own block at Uptown's north-east tip (North Point); its beacon sweep stays a live pivot.
-  const lightBlock = blocks.find((b) => b.format === 'lighthouse');
-  const lighthouse = lightBlock ? placeWaterfront('Lighthouse_North_Head', lightBlock.x + 1.5, .23, lightBlock.z - 1.5) : null;
+  // The lighthouse stands offshore off Uptown's north-east tip (North Point Park), clear of the coast road and sand, on a
+  // base of the beaches' coast rocks piled up big. Its beacon sweep stays a live pivot.
+  const point = blocks.find((b) => b.district === 'North Point Park');
+  let lighthouse = null;
+  if (point) {
+    const [lx, lz] = [point.x + 15, point.z - 15];
+    [[0, 0, 4.6, 0], [2.6, 1.2, 3.4, 1.1], [-2.4, 1.6, 3.2, 2.3], [1.4, -2.6, 3.6, 3.7], [-2.2, -2.0, 3.0, 5.0], [3.4, -1.0, 2.6, 0.4]]
+      .forEach(([dx, dz, scale, turn]) => place('Coast_Rock', lx + dx, -1.4, lz + dz, turn, scale));
+    lighthouse = placeWaterfront('Lighthouse_North_Head', lx, 3.0, lz); // on top of the central rock
+  }
   const sweep = lighthouse?.getObjectByName('Lighthouse_Beam_Sweep');
 
   // Stevensburgh Strand (Downtown's south beach) gets the beach activity and the kiosk.
@@ -88,12 +97,12 @@ export async function createCoastalScene() {
   const PORT_SCALE = 0.38;
   for (const dock of blocks.filter((b) => b.format === 'dockyard')) {
     const side = isOnLand(dock.x + 12, dock.z) ? -1 : 1; // which side is the sea
-    const face = dock.x + side * 6;
+    const face = dock.x + side * (6 + QUAY_OUT); // the quay edge, past the widened shore street
     const out = (d) => face + side * d; // d > 0: further offshore
     const offshore = side > 0 ? Math.PI / 2 : -Math.PI / 2; // turns the kit's +Z toward the sea
     const k = PORT_SCALE;
     // No marina: the water under the crane, between the rock pile and the breakwater, is the cargo barge's berth.
-    placeWaterfront('Gantry_Crane_Haysville', out(-1.6), .23, dock.z + 2.6, side > 0 ? 0 : Math.PI, k);
+    placeWaterfront('Gantry_Crane_Haysville', out(-1.6 - QUAY_OUT), .23, dock.z + 2.6, side > 0 ? 0 : Math.PI, k);
     placeWaterfront('Warehouse_Haysville_Docks', dock.x - side * 2.4, .23, dock.z - 1, Math.PI / 2, k);
     placeWaterfront('Container_Rust', dock.x + side * .4, .23, dock.z - 2.6, 0, k);
     placeWaterfront('Container_Teal', dock.x + side * .4, .23 + 2.6 * k, dock.z - 2.6, 0, k);
@@ -102,9 +111,19 @@ export async function createCoastalScene() {
     placeWaterfront('Breakwater_Harbor_Light', out(.2), -.28, dock.z + 9.5, offshore, k);
     placeWaterfront('Riprap_Rock_Pile', out(.4), -.25, dock.z - 7.5, 0, .6);
   }
+  // Container yards: stacks of the kit's containers (1-3 high) in two banks either side of a centre aisle.
+  for (const yard of blocks.filter((b) => b.format === 'containeryard')) {
+    const kinds = ['Container_Rust', 'Container_Teal', 'Container_Slate'];
+    let n = 0;
+    for (const dx of [-2.9, 0, 2.9]) for (const dz of [-3.6, -2.4, -1.2, 1.2, 2.4, 3.6]) {
+      const height = 1 + ((n * 7 + 3) % 5) % 3; // a fixed, varied skyline
+      for (let level = 0; level < height; level++) placeWaterfront(kinds[(n + level) % 3], yard.x + dx, .23 + level * .98, yard.z + dz, 0, PORT_SCALE);
+      n++;
+    }
+  }
   // Ace Chemicals' shore: a line of bollards (the landmark fills its block, so no containers).
   const ace = blocks.find((b) => b.format === 'landmark' && b.district === 'Haysville');
-  if (ace) for (const dz of [-4, 0, 4]) placeWaterfront('Harbor_Bollard', ace.x + 5.6, .23, ace.z + dz, 0, 1.05);
+  if (ace) for (const dz of [-4, 0, 4]) placeWaterfront('Harbor_Bollard', ace.x + 5.6 + QUAY_OUT, .23, ace.z + dz, 0, 1.05);
 
   // Consolidate the static waterfront set by material while retaining the
   // lighthouse beam and all named scene roots for animation and inspection.
@@ -141,7 +160,7 @@ export async function createCoastalScene() {
       const sea = isOnLand(b.x + 12, b.z) ? -1 : 1;
       // The jetty stands beyond the breakwater, outside the port (north of the rock pile where the shore ends first).
       const jz = isOnLand(b.x + sea * 5, b.z + 13) ? b.z + 13 : b.z - 11;
-      place('Harbor_Jetty', b.x + sea * 6, 0, jz, sea > 0 ? Math.PI / 2 : -Math.PI / 2, .6);
+      place('Harbor_Jetty', b.x + sea * (6 + QUAY_OUT), 0, jz, sea > 0 ? Math.PI / 2 : -Math.PI / 2, .6);
       place('Coast_Bench', b.x - 2, .23, b.z + 2, Math.PI / 2);
     }
   }

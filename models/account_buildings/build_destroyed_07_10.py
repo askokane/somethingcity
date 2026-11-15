@@ -1,4 +1,4 @@
-"""Build independent, burning ruin variants of account buildings 07–10.
+"""Route 07–09 and 10 to their compact 8-bit ruin builders.
 
 Run: Blender --background --python build_destroyed_07_10.py
 The original .blend, .glb, and .png files are only read, never written.
@@ -6,6 +6,7 @@ The original .blend, .glb, and .png files are only read, never written.
 
 import math
 import random
+import runpy
 import sys
 from pathlib import Path
 
@@ -343,5 +344,8 @@ def build(idx):
 
 
 requested = [int(a) for a in sys.argv[sys.argv.index('--')+1:]] if '--' in sys.argv else []
-for number in (requested or (7,8,9,10)):
-    build(number)
+numbers = requested or (7,8,9,10)
+if any(number in (7,8,9) for number in numbers):
+    runpy.run_path(str(OUT/'build_destroyed_07_09_8bit.py'), run_name='__main__')
+if 10 in numbers:
+    runpy.run_path(str(OUT/'build_account_10_destroyed_8bit.py'), run_name='__main__')
