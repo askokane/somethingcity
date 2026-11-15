@@ -47,3 +47,12 @@ body{background:#101a25}
 .landmark-menu button:hover,.landmark-menu button:focus-visible{border-color:#416174;background:#183044;outline:none}
 .landmark-menu strong{display:block;color:#ffe480;font-size:12px;letter-spacing:.04em;text-transform:uppercase}
 .landmark-menu span{color:#a9c2c0}
+
+.trend-chart{margin:0 0 12px;padding:10px 10px 6px;background:#183044;border:2px solid #416174}
+.trend-chart figcaption{margin-bottom:4px;color:#ffe480;font:bold 11px "Courier New",monospace;letter-spacing:.04em;text-transform:uppercase}
+.trend-plot{position:relative}
+.trend-plot svg{display:block;width:100%;height:auto;font-family:"Courier New",monospace}
+.trend-bar path{transition:opacity .12s}
+.trend-plot:hover .trend-bar:not(.is-hot) path{opacity:.55}
+.trend-tip{position:absolute;pointer-events:none;white-space:nowrap;padding:5px 7px;background:#0e202d;border:2px solid #416174;color:#e6efe9;font:10px "Courier New",monospace}
+.trend-tip[hidden]{display:none}

@@ -3288,15 +3288,52 @@ function addAccount() {
   showToast('Account added to the local demo.');
 }
 
+// Breaches per year as a column chart (oldest left): one series, so no legend (the heading names it). Recessive grid at
+// 0 / half / max, year labels every five years, 4px rounded column tops on the baseline, 2px gaps, and a tooltip per
+// column (the year list below the chart is its table view).
+function breachTrendChart(rows) {
+  const years = rows.slice().sort((a, b) => a.year - b.year);
+  const W = 320, H = 150, L = 30, R = 6, T = 10, B = 22, plotW = W - L - R, plotH = H - T - B;
+  const most = Math.max(...years.map((row) => Number(row.breaches) || 0), 1);
+  const step = plotW / years.length, barW = Math.max(2, step - 2);
+  const y = (v) => T + plotH - (v / most) * plotH;
+  const grid = [0, Math.round(most / 2), most].map((v) => `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="#2a4558" stroke-width="1"/><text x="${L - 5}" y="${y(v) + 3}" text-anchor="end" fill="#7f97a0" font-size="8">${v}</text>`).join('');
+  const bars = years.map((row, i) => {
+    const v = Number(row.breaches) || 0, x = L + i * step + 1, top = y(v), h = T + plotH - top, r = Math.min(4, h, barW / 2);
+    const shape = h > 0 ? `<path d="M${x},${T + plotH} V${top + r} Q${x},${top} ${x + r},${top} H${x + barW - r} Q${x + barW},${top} ${x + barW},${top + r} V${T + plotH} Z" fill="#e58268"/>` : '';
+    const tip = `${row.year}: ${v.toLocaleString()} breaches, ${Number(row.records).toLocaleString()} records`;
+    return `<g class="trend-bar" data-tip="${escapeHtml(tip)}">${shape}<rect x="${L + i * step}" y="${T}" width="${step}" height="${plotH}" fill="transparent"><title>${escapeHtml(tip)}</title></rect></g>`;
+  }).join('');
+  const labels = years.map((row, i) => (i === 0 || i === years.length - 1 || (row.year % 5 === 0 && i > 1 && i < years.length - 2)) // no five-year label crowding the ends
+    ? `<text x="${L + i * step + step / 2}" y="${H - 6}" text-anchor="middle" fill="#7f97a0" font-size="8">${row.year}</text>` : '').join('');
+  const first = years[0], last = years.at(-1);
+  return `<figure class="trend-chart"><figcaption>Breaches per year</figcaption><div class="trend-plot"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Breaches per year from ${first.year} (${first.breaches}) to ${last.year} (${last.breaches}), peaking at ${most}">${grid}${bars}${labels}<line x1="${L}" x2="${W - R}" y1="${T + plotH}" y2="${T + plotH}" stroke="#7f97a0" stroke-width="1"/></svg><div class="trend-tip" hidden></div></div></figure>`;
+}
+function wireTrendTips(container) {
+  const plot = container.querySelector('.trend-plot'), tip = plot?.querySelector('.trend-tip');
+  if (!plot) return;
+  plot.addEventListener('mousemove', (event) => {
+    const bar = event.target.closest('.trend-bar');
+    plot.querySelectorAll('.trend-bar.is-hot').forEach((node) => node.classList.remove('is-hot'));
+    if (!bar) { tip.hidden = true; return; }
+    bar.classList.add('is-hot');
+    tip.textContent = bar.dataset.tip;
+    tip.hidden = false;
+    const box = plot.getBoundingClientRect();
+    tip.style.left = `${Math.min(box.width - tip.offsetWidth, Math.max(0, event.clientX - box.left - tip.offsetWidth / 2))}px`;
+    tip.style.top = `${Math.max(0, event.clientY - box.top - tip.offsetHeight - 10)}px`;
+  });
+  plot.addEventListener('mouseleave', () => { tip.hidden = true; plot.querySelectorAll('.trend-bar.is-hot').forEach((node) => node.classList.remove('is-hot')); });
+}
+
 function showFeature(view) {
   const drawer = document.querySelector('#feature-drawer');
   const content = document.querySelector('#feature-content');
-  const titles = { accounts: 'Account directory', inbox: 'Inbox scan', timeline: 'Breach timeline', history: 'Your breach history' };
-  const site = accountsById.get(selectedId);
+  const titles = { accounts: 'Account directory', inbox: 'Inbox scan', timeline: 'Breach trends', history: 'Your breach history' };
   document.querySelectorAll('.nav-link[data-view]').forEach((node) => node.classList.toggle('is-active', node.dataset.view === view));
   if (view === 'overview') { drawer.hidden = true; return; }
   drawer.hidden = false;
-  content.innerHTML = `<p class="eyebrow">BREACHLINK / DATA DESK</p><h2>${titles[view]}</h2><p class="drawer-summary">${view === 'accounts' ? `${accounts.length} services in this account check.` : view === 'history' ? `Every breach that included your email, across all your websites, newest first. Breaches from the last ${RECENT_BREACH_MONTHS} months still mark a site as breached in the city.` : view === 'inbox' ? 'Services found in welcome and account notification headers.' : site ? `Every known breach of ${escapeHtml(site.name)}, newest first, from the Tiger Data breach catalog. Breaches that included your email are marked.` : 'Select a website in the city or the account directory to see its breach timeline.'}</p><div id="feature-results" class="feature-results"><p class="drawer-empty">Loading account data…</p></div>`;
+  content.innerHTML = `<p class="eyebrow">BREACHLINK / DATA DESK</p><h2>${titles[view]}</h2><p class="drawer-summary">${view === 'accounts' ? `${accounts.length} services in this account check.` : view === 'history' ? `Every breach that included your email, across all your websites, newest first. Breaches from the last ${RECENT_BREACH_MONTHS} months still mark a site as breached in the city.` : view === 'inbox' ? 'Services found in welcome and account notification headers.' : 'Publicly reported breaches per year and the records they exposed, from the Tiger Data breach catalog.'}</p><div id="feature-results" class="feature-results"><p class="drawer-empty">Loading account data…</p></div>`;
   const results = document.querySelector('#feature-results');
   if (view === 'accounts') {
     results.innerHTML = accounts.length ? `<div class="feature-table"><div class="feature-table-head"><span>SERVICE</span><span>STATUS</span><span>SOURCE</span></div>${accounts.map((a) => `<button class="feature-table-row" type="button" data-account="${escapeHtml(a.id)}"><span><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(a.domain || a.label)}</small></span><b class="status-${a.status}">${accountBadge(a)}</b><small>${escapeHtml((a.foundIn || []).join(' + ') || a.source)}</small></button>`).join('')}</div>` : '<p class="drawer-empty">Run a check to populate the account directory.</p>';
@@ -3310,20 +3347,17 @@ function showFeature(view) {
     const inboxAccounts = accounts.filter((a) => a.foundIn?.includes('inbox'));
     results.innerHTML = inboxAccounts.length ? `<div class="feature-table"><div class="feature-table-head"><span>SERVICE</span><span>FOUND</span><span>FIRST SEEN</span></div>${inboxAccounts.map((a) => `<div class="feature-table-row"><span><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(a.domain)}</small></span><b>${a.status === 'breached' ? 'INBOX + BREACH' : 'INBOX'}</b><small>${escapeHtml(a.firstSeen || 'Date unavailable')}</small></div>`).join('')}</div>` : `<p class="drawer-empty">${currentCheck ? 'No inbox data in this check. Sign in with Google and grant inbox access to scan your account.' : 'Run a check or sign in with Google to see services found in your inbox.'}</p>`;
   } else if (view === 'timeline') {
-    // The selected website's breach history: every known breach of the service (the check's serviceBreaches, from Tiger
-    // Data or the checker's catalog) merged with the breaches that included this user's email, newest first.
-    if (!site) { results.innerHTML = '<p class="drawer-empty">No website selected. Click a building in the city or a row in Accounts.</p>'; return; }
-    const mine = [...(site.breaches || []), ...(site.historical || [])];
-    const mineNames = new Set(mine.map((breach) => breach.name));
-    const rows = [...mine];
-    for (const breach of site.serviceBreaches || []) if (!mineNames.has(breach.name)) rows.push(breach);
-    rows.sort((x, y) => String(y.date).localeCompare(String(x.date)));
-    results.innerHTML = rows.length ? `<div class="timeline-list">${rows.map((breach) => {
-      const yours = mineNames.has(breach.name);
-      const year = /^\d{4}/.test(String(breach.date)) ? String(breach.date).slice(0, 4) : '—';
-      const records = Number(breach.records) > 0 ? `${Number(breach.records).toLocaleString()} records` : '';
-      return `<article class="timeline-row"><strong>${escapeHtml(year)}</strong><span><b>${escapeHtml(breach.name)}</b><br>${escapeHtml(breach.date || '')}${records ? ` · ${records}` : ''}<br>${escapeHtml((breach.exposedData || []).join(', '))}</span><span class="${yours ? 'status-breached' : 'status-unknown'}">${yours ? 'INCLUDED YOUR EMAIL' : 'SERVICE BREACH'}</span></article>`;
-    }).join('')}</div>` : `<p class="drawer-empty">No known breaches of ${escapeHtml(site.name)} in this source. That isn't a guarantee: it only covers publicly reported breaches.</p>`;
+    // Breach trends: every publicly reported breach, totalled by year (the checker's Tiger Data catalog). Without the
+    // checker it falls back to the bundled sample of the same catalog, labelled as such.
+    const draw = (rows, sample) => {
+      if (!Array.isArray(rows) || !rows.length) { results.innerHTML = '<p class="drawer-empty">Breach trends are unavailable right now.</p>'; return; }
+      const most = Math.max(...rows.map((row) => Number(row.breaches) || 0));
+      results.innerHTML = `${sample ? '<p class="drawer-empty">Showing sample data: the checker service is offline.</p>' : ''}${breachTrendChart(rows)}<div class="timeline-list">${rows.slice().reverse().map((row) => `<article class="timeline-row"><strong>${escapeHtml(row.year)}</strong><span><b>${Number(row.breaches).toLocaleString()}</b> breaches<br><i style="display:block;height:6px;margin-top:5px;width:${Math.max(2, Math.round((Number(row.breaches) / most) * 100))}%;background:#e58268"></i></span><span>${Number(row.records).toLocaleString()} records exposed</span></article>`).join('')}</div>`;
+      wireTrendTips(results);
+    };
+    fetch(`${CHECKER_API}/api/timeline`).then((response) => (response.ok ? response.json() : Promise.reject()))
+      .then((rows) => draw(rows, false))
+      .catch(() => fetch('./checker/samples/timeline-mine.json').then((response) => response.json()).then((rows) => draw(rows, true)).catch(() => draw(null)));
   }
 }
 
