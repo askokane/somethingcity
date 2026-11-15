@@ -30,7 +30,7 @@ const assert = require('node:assert/strict');
     await waitReady();
     const failure = await evaluate(`(async()=>{
       const app=await import('./app.js');
-      return { bridge:!!app.scene.getObjectByName('Inter-island gothic bridge'), coast:!!app.scene.getObjectByName('Blender coastal districts'), props:!!app.scene.getObjectByName('Sidewalk benches and trash cans'), message:document.querySelector('#toast').textContent };
+      return { bridge:!!app.scene.getObjectByName('Gotham bridges'), coast:!!app.scene.getObjectByName('Blender coastal districts'), props:!!app.scene.getObjectByName('Sidewalk benches and trash cans'), message:document.querySelector('#toast').textContent };
     })()`);
     assert.equal(failure.bridge,false);
     assert.equal(failure.coast,true,'Bridge failure must preserve coastal assets');
@@ -43,11 +43,11 @@ const assert = require('node:assert/strict');
     await send('Emulation.setDeviceMetricsOverride',{width:1440,height:1000,deviceScaleFactor:1,mobile:false});
     await send('Page.reload',{ignoreCache:true});
     await waitReady();
-    assert.equal(await evaluate(`import('./app.js').then(a=>!!a.scene.getObjectByName('Inter-island gothic bridge'))`),true,'Bridge must recover after reload');
+    assert.equal(await evaluate(`(async()=>{const a=await import('./app.js'),l=await import('./city-layout.js');return a.scene.getObjectByName('Gotham bridges')?.children.length===l.bridges.length})()`),true,'All bridges must recover after reload');
     await evaluate(`(async()=>{
       const app=await import('./app.js'),layout=await import('./city-layout.js');
       const offset=app.camera.position.clone().sub(app.controls.target);
-      app.controls.target.set(layout.bridge.x,0,layout.bridge.z);
+      app.controls.target.set(layout.bridges[0].x,0,layout.bridges[0].z);
       app.camera.position.copy(app.controls.target).add(offset);app.camera.zoom=4.5;app.camera.updateProjectionMatrix();app.controls.update();
     })()`);
     console.log('PASS: bridge recovers on reload; localhost is ready at the crossing.');

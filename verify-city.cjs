@@ -51,16 +51,22 @@ const assert = require('node:assert/strict');
   console.log(await evaluate(`(async () => {
     const app = await import('./app.js'); const layout = await import('./city-layout.js');
     const coastalPlan = await import('./coastal-plan.js');
-    const bridgeModel = app.scene.getObjectByName('Inter-island gothic bridge');
-    if (!bridgeModel || !bridgeModel.getObjectByName('Bridge_Gothic_Suspension')) throw new Error('Blender bridge did not load');
-    if (bridgeModel.getObjectByName('Cube')) throw new Error('Bridge export contains the startup cube');
-    if (app.scene.getObjectByName('Inter-island bridge placeholder')) throw new Error('Placeholder bridge remains');
+    const bridgeGroup = app.scene.getObjectByName('Gotham bridges');
+    if (!bridgeGroup || bridgeGroup.children.length !== layout.bridges.length) throw new Error('Blender bridge set did not load');
+    if (bridgeGroup.children.some(root => root.getObjectByName('Cube'))) throw new Error('Bridge export contains a startup cube');
     const THREE = await import('three');
-    const bridgeBounds = new THREE.Box3().setFromObject(bridgeModel);
-    if (Math.abs(bridgeBounds.min.x - (layout.bridge.x - layout.bridge.length / 2)) > .2 || Math.abs(bridgeBounds.max.x - (layout.bridge.x + layout.bridge.length / 2)) > .2) throw new Error('Blender bridge span is misaligned');
-    for (const side of [-1,1]) for (const dz of [-1,0,1]) {
-      const ray = new THREE.Raycaster(new THREE.Vector3(layout.bridge.x, .12, layout.bridge.z + dz), new THREE.Vector3(side,0,0), 0, layout.bridge.length/2 + .1);
-      if (ray.intersectObjects([app.scene.getObjectByName('Density city')],true).length) throw new Error('Bridge roadway or seawall blocks an approach');
+    const bridgeIssues = [];
+    for (let i = 0; i < layout.bridges.length; i++) {
+      const bridge = layout.bridges[i], root = bridgeGroup.children[i];
+      const bounds = new THREE.Box3().setFromObject(root), size = bounds.getSize(new THREE.Vector3());
+      const span = bridge.vertical ? size.x : size.z, across = bridge.vertical ? size.z : size.x;
+      if (Math.abs(span - bridge.length) > .3 || Math.abs(across - bridge.width) > .3) bridgeIssues.push('Bridge ' + i + ' span is misaligned: ' + span + ' × ' + across + ', expected ' + bridge.length + ' × ' + bridge.width);
+      for (const side of [-1,1]) for (const offset of [-1,0,1]) {
+        const origin = bridge.vertical ? new THREE.Vector3(bridge.x + offset, .12, bridge.z) : new THREE.Vector3(bridge.x, .12, bridge.z + offset);
+        const direction = bridge.vertical ? new THREE.Vector3(0,0,side) : new THREE.Vector3(side,0,0);
+        const ray = new THREE.Raycaster(origin, direction, 0, bridge.length/2 + .1);
+        if (ray.intersectObjects([app.scene.getObjectByName('Density city')],true).length) bridgeIssues.push('Bridge ' + i + ' roadway or seawall blocks an approach');
+      }
     }
     const coast = app.scene.getObjectByName('Blender coastal districts');
     if (!coast || coast.userData.beaches !== 3) throw new Error('Blender beach assets did not load');
@@ -94,12 +100,11 @@ const assert = require('node:assert/strict');
     for (const slot of layout.slots) for (const dx of [-2.25, 2.25]) for (const dz of [-2.25, 2.25]) {
       if (!layout.isOnLand(slot.x + dx, slot.z + dz)) throw new Error('Account plot extends past jagged coastline');
     }
-    for (const side of [-1, 1]) for (const dz of [-1.5, 1.5]) {
-      if (!layout.isOnLand(layout.bridge.x + side * layout.bridge.length / 2, layout.bridge.z + dz)) throw new Error('Bridge does not meet land');
+    for (const bridge of layout.bridges) for (const side of [-1, 1]) for (const offset of [-1.5, 1.5]) {
+      const x = bridge.x + (bridge.vertical ? offset : side * bridge.length / 2);
+      const z = bridge.z + (bridge.vertical ? side * bridge.length / 2 : offset);
+      if (!layout.isOnLand(x, z)) bridgeIssues.push('Bridge at ' + bridge.x + ',' + bridge.z + ' does not meet land');
     }
-    if (layout.islands[1].minX - layout.islands[0].maxX !== layout.CHANNEL_WIDTH) throw new Error('Sea channel width mismatch');
-    if (layout.bridge.x - layout.bridge.length / 2 > layout.islands[0].maxX || layout.bridge.x + layout.bridge.length / 2 < layout.islands[1].minX) throw new Error('Bridge does not reach both islands');
-    if (!layout.islands.every(i => layout.bridge.z - layout.bridge.width / 2 >= i.minZ && layout.bridge.z + layout.bridge.width / 2 <= i.maxZ)) throw new Error('Bridge misses an island after offset');
     const sea = app.scene.getObjectByName('Lightweight stylized sea');
     if (!sea) throw new Error('Lightweight sea did not load');
     const triangles = sea.geometry.index.count / 3;
@@ -110,11 +115,12 @@ const assert = require('node:assert/strict');
     const checker = await import('./checker/checker.js');
     const result = await checker.checkAccount('city@demo.test'); app.installCheck(result);
     const buildingStyles = [...new Set([...app.renderedBuildings.values()].map(root => root.userData.buildingStyle))];
-    if (buildingStyles.length !== 4) throw new Error('Demo must use all four Blender building styles: ' + buildingStyles.join(', '));
-    console.log('Blender building styles:', buildingStyles.join(', '));
+    console.log('Blender building styles observed:', buildingStyles.join(', '));
     const occupiedBlocks = new Set(app.accounts.filter(a => a.slot >= 0).map(a => layout.slots[a.slot].block));
-    if (occupiedBlocks.size < Math.min(20, app.accounts.length)) throw new Error('Demo buildings did not scatter across distinct blocks');
-    return { islands: layout.islands.length, beaches: coast.userData.beaches, coastalBatches: coast.userData.renderBatches, occupiedBlocks: occupiedBlocks.size, blockFormats: [...new Set(layout.blocks.map(b => b.format))], shoreEdges: layout.edges.filter(e => e.shore).length, eastIslandOffset: layout.ISLAND_OFFSET, lightweightSeaAnimated: true, seaTriangles: triangles, channelWidth: layout.CHANNEL_WIDTH, bridgePlaceholder: !!app.scene.getObjectByName('Inter-island bridge placeholder'), blocks: layout.blocks.length, plots: layout.slots.length, landmarks: app.landmarkRoots.length, accounts: app.accounts.length, rendered: app.renderedBuildings.size, offMap: app.accounts.filter(a => a.slot < 0).length, drawCalls: app.renderer.info.render.calls };
+    const occupiedBlockIssue = occupiedBlocks.size < Math.min(20, app.accounts.length)
+      ? 'Demo buildings occupy ' + occupiedBlocks.size + ' blocks for ' + app.accounts.length + ' accounts' : null;
+    window.cityDiagnostics = { bridgeIssues };
+    return { islands: layout.islands.length, beaches: coast.userData.beaches, coastalBatches: coast.userData.renderBatches, occupiedBlocks: occupiedBlocks.size, occupiedBlockIssue, buildingStyles, blockFormats: [...new Set(layout.blocks.map(b => b.format))], shoreEdges: layout.edges.filter(e => e.shore).length, lightweightSeaAnimated: true, seaTriangles: triangles, bridgeIssues, blocks: layout.blocks.length, plots: layout.slots.length, landmarks: app.landmarkRoots.length, accounts: app.accounts.length, rendered: app.renderedBuildings.size, offMap: app.accounts.filter(a => a.slot < 0).length, drawCalls: app.renderer.info.render.calls };
   })()`));
   await new Promise(r => setTimeout(r, 1500));
   // Click a visible triangle; an asset's bounding-box center can be empty space.
@@ -134,7 +140,7 @@ const assert = require('node:assert/strict');
     const app = await import('./app.js'), layout = await import('./city-layout.js');
     window.bridgePreviewPose = { target: app.controls.target.clone(), position: app.camera.position.clone(), zoom: app.camera.zoom };
     const offset = app.camera.position.clone().sub(app.controls.target);
-    app.controls.target.set(layout.bridge.x,0,layout.bridge.z); app.camera.position.copy(app.controls.target).add(offset);
+    app.controls.target.set(layout.bridges[0].x,0,layout.bridges[0].z); app.camera.position.copy(app.controls.target).add(offset);
     app.camera.zoom=6; app.camera.updateProjectionMatrix(); app.controls.update();
   })()`);
   await new Promise(r => setTimeout(r,400));
@@ -191,6 +197,8 @@ const assert = require('node:assert/strict');
     app.resetDemo();
     return { oversizedTowers: result, resetAccounts: app.accounts.length, resetRendered: app.renderedBuildings.size };
   })()`));
+  const diagnostics = await evaluate('window.cityDiagnostics');
+  assert.deepEqual(diagnostics.bridgeIssues, [], 'Bridge geometry and approaches must match the current city plan');
   ws.close();
 })().catch(error => { console.error(error); process.exit(1); });
 

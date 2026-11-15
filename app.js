@@ -2085,7 +2085,7 @@ async function requestCode() {
     if (!response.ok) throw new Error(data.error || 'Could not send a code.');
     verifiedEmail = email;
     setVerificationStep(true);
-    error.textContent = data.sent === 'email' ? 'Code sent. Check your email.' : 'Code generated. Check the checker service console in local demo mode.';
+    error.textContent = data.sent === 'email' ? 'Code sent. Check your email.' : 'Code generated. Check the checker service console.';
   } catch (problem) { error.textContent = problem.message || 'Checker service is unavailable.'; }
 }
 
@@ -2164,7 +2164,8 @@ function installCheck(result) {
   });
   syncPlotParks();
   renderOverview(); renderDetails();
-  document.querySelector('#service-status').textContent = result.source.startsWith('Demo') ? 'OFFLINE DEMO' : result.status === 'unknown' ? 'CHECK UNAVAILABLE' : 'ACCOUNT VERIFIED';
+  const serviceStatus = document.querySelector('#service-status');
+  if (serviceStatus) serviceStatus.textContent = result.source.startsWith('Demo') ? 'OFFLINE DEMO' : result.status === 'unknown' ? 'CHECK UNAVAILABLE' : 'ACCOUNT VERIFIED';
   showToast(result.status === 'unknown' ? (result.error || 'Check unavailable')
     : accounts.length ? `Check complete · ${accounts.length} accounts`
     : 'No breaches for this email. Sign in with Google to scan your inbox for the websites you use.');
