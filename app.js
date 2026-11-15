@@ -2007,7 +2007,7 @@ function updateSelectionArrow(delta) {
 
 // Tai's GCPD helicopter (models/everything-else/gotham_police_helicopter.glb: rotors, hover bob and searchlight sweep in
 // its loop; nose along -Z). One circles every breached tower; two more fly the streets on routes across the city.
-const HELI = { scale: 0.6, orbit: 7, above: 5, orbitSpeed: 0.35, patrolHeight: 16, patrolSpeed: 9 };
+const HELI = { scale: 0.6, orbit: 7, above: 5, orbitSpeed: 0.35, patrolHeight: 16, patrolSpeed: 2.2 }; // patrols crawl over the streets
 let heliModel = null;
 const circlingHelis = new Map(); // account id -> helicopter
 const patrolHelis = [];
@@ -3300,7 +3300,7 @@ function showFeature(view) {
   const results = document.querySelector('#feature-results');
   if (view === 'accounts') {
     results.innerHTML = accounts.length ? `<div class="feature-table"><div class="feature-table-head"><span>SERVICE</span><span>STATUS</span><span>SOURCE</span></div>${accounts.map((a) => `<button class="feature-table-row" type="button" data-account="${escapeHtml(a.id)}"><span><strong>${escapeHtml(a.name)}</strong><small>${escapeHtml(a.domain || a.label)}</small></span><b class="status-${a.status}">${accountBadge(a)}</b><small>${escapeHtml((a.foundIn || []).join(' + ') || a.source)}</small></button>`).join('')}</div>` : '<p class="drawer-empty">Run a check to populate the account directory.</p>';
-    results.querySelectorAll('[data-account]').forEach((row) => row.addEventListener('click', () => { selectAccount(row.dataset.account); drawer.hidden = true; }));
+    results.querySelectorAll('[data-account]').forEach((row) => row.addEventListener('click', () => { selectAccount(row.dataset.account); showAccountReport(row.dataset.account); drawer.hidden = true; }));
   } else if (view === 'history') {
     const old = accounts.flatMap((a) => [...(a.breaches || []).map((breach) => ({ a, breach, current: true })), ...(a.historical || []).map((breach) => ({ a, breach, current: false }))])
       .sort((x, y) => String(y.breach.date).localeCompare(String(x.breach.date)));
